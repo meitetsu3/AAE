@@ -3,19 +3,27 @@
 Created on Thu Nov 16 11:50:32 2017
 ref: https://github.com/Naresh1318/Adversarial_Autoencoder
 @author: mtodaka
-: l2 / Drop out
 
+: tying weights?
 :CNN, descriminator
 :CNN, more layers on encoder
 :CNN, decoder
+:latent, flower, supervised
+:latent, flower, semi-supervised 
+
+: l2 
+: max-norm regularization
+: early stopping
+: learning rate schedule
+: BN, heavy and did not work. want to try again?
+
+: ae train by layers
+: ae pretrain, then semi-supervised?
 :pre train layer by layers, then final training.
-:10 leaves unsupervised
+
 :group the dense layer naming
 
-:latent, flower, supervised
-:run the code on GPU
-
-:latent, flower, semi-supervised 
+:run the code on EC2 GPU
 :latent, unsupervised
 :latent, semi-supervised
 :latent, semi-supervised round shape
@@ -36,16 +44,26 @@ modes:
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
 # you may want to change these to control your experiments
-exptitle =  'Gen-OoT_Density' #experiment title that goes in tensorflow folder name
-# weak out of target panalty
+exptitle =  'SymAE_7Lf_10002_Relu_dcrealdev3' #experiment title that goes in tensorflow folder name
+# AEcostToLogit
 mode= 0
 flg_graph = True # showing graphs or not during the training. Showing graphs significantly slows down the training.
-n_leaves = 3 # number of leaves in the mixed 2D Gaussian
+n_leaves = 7 # number of leaves in the mixed 2D Gaussian
+n_ge_epoch_booster = 1
+n_epochs_ae = 0*n_leaves # mode 1, autoencoder training epochs
+n_step_dc = 10*n_leaves # mode 2, descriminator training steps
+n_epochs_ge = 120*n_leaves # mode 3, generator training epochs
+ac_batch_size = 100  # autoencoder training batch size
+import numpy as np
+blanket_resolution = 100*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
+dc_real_batch_size = int(blanket_resolution*blanket_resolution/3) # descriminator training real dist samplling batch size
+dc_fake_batch_size = int(dc_real_batch_size/4) # generator batch size for autoencoder and fake
+keep_prob = 0.95
 
 import tensorflow as tf
 from tensorflow.contrib.layers import fully_connected
+from tensorflow.contrib.layers import dropout
 #from tensorflow.contrib.layers import batch_norm
-import numpy as np
 from datetime import datetime
 import os
 import matplotlib
@@ -56,30 +74,24 @@ import random
 from math import cos,sin
 from tqdm import tqdm
 
-n_epochs_ae = 0*n_leaves # mode 1, autoencoder training epochs
-n_step_dc = 50*n_leaves # mode 2, descriminator training steps
-n_epochs_ge = 20*n_leaves # mode 3, generator training epochs
 ge_OoT_weight = 0.0001 # Out of terget weight to make reconstraction const more effective. 
                         #Dynamically update to the same scalse as autoencoder_loss 
-ge_Dst_weight = 0.0001 # distance weight. to give a direction to on target.
-ac_batch_size = 100  # autoencoder training batch size
-ge_batch_size = ac_batch_size*n_leaves # generator training batch size
-blanket_resolution = 100*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
-dc_batch_size = blanket_resolution*blanket_resolution # descriminator training real dist samplling batch size
+#ge_batch_size = ac_batch_size*n_leaves # generator training batch size
+
 
 input_dim = 784
 xLU = [-10,10] # blanket x axis lower and upper
 yLU = [-10,10] # blanket y axis lower and upper
-n_l1 = 500
-n_l2 = 450
-n_l3 = 400
-n_l4 = 350
-n_l5 = 300
-n_l6 = 250
-n_l7 = 200
-n_l8 = 200
-n_l9 = 200
-n_l10 = 200
+n_l1 = 1000
+n_l2 = 1000
+#n_l3 = 450
+#n_l4 = 350
+#n_l5 = 350
+#n_l6 = 300
+#n_l7 = 300
+#n_l8 = 250
+#n_l9 = 250
+#n_l10 = 200
 z_dim = 2
 results_path = './Results/Adversarial_Autoencoder'
 
@@ -133,7 +145,7 @@ def show_inout(sess,op):
         return
     idx = random.sample(range(mnist[0].num_examples),ac_batch_size)
     img_in = mnist[0].images[idx,:]
-    img_out = sess.run(op, feed_dict={x_input: img_in})
+    img_out = sess.run(op, feed_dict={x_input: img_in, is_training:False})
     img_out_s = img_out.reshape(ac_batch_size,28,28)
     img_in_s = img_in.reshape(ac_batch_size,28,28)
     #.reshape(10,28,28)
@@ -163,7 +175,7 @@ def show_latent_code(sess):
     plt.tight_layout()
     
     with tf.variable_scope("Encoder"):
-        test_zs = sess.run(encoder(mnist[0].images, reuse=True))
+        test_zs = sess.run(encoder(mnist[0].images, reuse=True),feed_dict={is_training:False})
     ytrain = np.argmax(mnist[0].labels,axis=1)
     
     cm = plt.cm.get_cmap('tab10')
@@ -196,7 +208,7 @@ def show_discriminator(sess):
     X, Y = np.meshgrid(xlist, ylist)    
     
     with tf.variable_scope("Discriminator"):
-        desc_result = sess.run(tf.nn.sigmoid(discriminator(blanket, reuse=True)))
+        desc_result = sess.run(tf.nn.sigmoid(discriminator(blanket, reuse=True)),feed_dict={is_training:False})
 
     Z = np.empty((blanket_resolution,blanket_resolution), dtype="float32")    
     for i in range(blanket_resolution):
@@ -241,25 +253,59 @@ def show_real_dist(z_real_dist):
     plt.show()
     plt.close()
 
-def mlp(x): # multi layer perceptron
+def leaky_relu(z, name=None):
+    return tf.maximum(0.01 * z, z, name=name)
+
+def mlp_enc(x): # multi layer perceptron
     with tf.contrib.framework.arg_scope(
             [fully_connected],
             #normalizer_fn=batch_norm,
             #normalizer_params=bn_params,
             #weights_regularizer=tf.contrib.layers.l2_regularizer(scale=0.01),
-            activation_fn=tf.nn.elu,
+            #activation_fn=tf.nn.elu, 
             weights_initializer=he_init):
-        elu1 = fully_connected(x, n_l1,scope='elu1')
-        elu2 = fully_connected(elu1, n_l2,scope='elu2')
-        elu3 = fully_connected(elu2, n_l3,scope='elu3')
-        elu4 = fully_connected(elu3, n_l4,scope='elu4')
-        elu5 = fully_connected(elu4, n_l5,scope='elu5')
-        elu6 = fully_connected(elu5, n_l6,scope='elu6')
-        elu7 = fully_connected(elu6, n_l7,scope='elu7')
-        elu8 = fully_connected(elu7, n_l8,scope='elu8')
-        elu9 = fully_connected(elu8, n_l9,scope='elu9')
-        elu10 = fully_connected(elu9, n_l10,scope='elu10')
-    return elu10
+        x_d = dropout(x, keep_prob, is_training=is_training)
+        elu1 = fully_connected(x_d, n_l1,scope='elu1')
+        elu1_d = dropout(elu1, keep_prob, is_training=is_training)
+        elu2 = fully_connected(elu1_d, n_l2,scope='elu2')
+#        elu2_d = dropout(elu2, keep_prob, is_training=is_training)
+#        elu3 = fully_connected(elu2_d, n_l3,scope='elu3')
+#        elu3_d = dropout(elu3, keep_prob, is_training=is_training)
+#        elu4 = fully_connected(elu3_d, n_l4,scope='elu4')
+#        elu4_d = dropout(elu4, keep_prob, is_training=is_training)
+#        elu5 = fully_connected(elu4_d, n_l5,scope='elu5')
+#        elu5_d = dropout(elu5, keep_prob, is_training=is_training)
+#        elu6 = fully_connected(elu5_d, n_l6,scope='elu6')
+#        elu7 = fully_connected(elu6, n_l7,scope='elu7')
+#        elu8 = fully_connected(elu7, n_l8,scope='elu8')
+#        elu9 = fully_connected(elu8, n_l9,scope='elu9')
+#        elu10 = fully_connected(elu9, n_l10,scope='elu10')
+    return elu2
+
+def mlp_dec(x): # multi layer perceptron
+    with tf.contrib.framework.arg_scope(
+            [fully_connected],
+            #normalizer_fn=batch_norm,
+            #normalizer_params=bn_params,
+            #weights_regularizer=tf.contrib.layers.l2_regularizer(scale=0.01),
+            #activation_fn=tf.nn.elu, 
+            weights_initializer=he_init):
+#        elu10 = fully_connected(x, n_l10,scope='d_elu10')
+#        elu9 = fully_connected(elu10, n_l9,scope='d_elu9')
+#        elu8 = fully_connected(elu9, n_l8,scope='d_elu8')
+#        elu7 = fully_connected(elu8, n_l7,scope='d_elu7')
+#        elu6 = fully_connected(elu7, n_l6,scope='d_elu6') 
+#        elu5 = fully_connected(elu6, n_l5,scope='d_elu5')
+#        elu5_d = dropout(elu5, keep_prob, is_training=is_training)
+#        elu4 = fully_connected(elu5_d, n_l4,scope='d_elu4')
+#        elu14_d = dropout(elu4, keep_prob, is_training=is_training)
+#        elu3 = fully_connected(elu14_d, n_l3,scope='d_elu3')
+#        elu13_d = dropout(elu3, keep_prob, is_training=is_training)
+        elu2 = fully_connected(x, n_l2,scope='d_elu2')
+        elu12_d = dropout(elu2, keep_prob, is_training=is_training)
+        elu1 = fully_connected(elu12_d, n_l1,scope='d_elu1')
+        elu1_d = dropout(elu1, keep_prob, is_training=is_training)
+    return elu1_d
 
 def encoder(x, reuse=False):
     """
@@ -270,7 +316,7 @@ def encoder(x, reuse=False):
     """
     if reuse:
         tf.get_variable_scope().reuse_variables()
-    last_layer = mlp(x)
+    last_layer = mlp_enc(x)
     output = fully_connected(last_layer, z_dim,weights_initializer=he_init, scope='None7',activation_fn=None)
     
     return output
@@ -281,11 +327,12 @@ def decoder(x, reuse=False):
     :param x: input to the decoder
     :param reuse: True -> Reuse the decoder variables, False -> Create the variables
     :return: tensor which should ideally be the input given to the encoder.
+    tf.sigmoid
     """
     if reuse:
         tf.get_variable_scope().reuse_variables()
     
-    last_layer = mlp(x)
+    last_layer = mlp_dec(x)
     output = fully_connected(last_layer, input_dim, weights_initializer=he_init, scope='Sigmoid7', activation_fn=tf.sigmoid)
     return output
 
@@ -299,7 +346,7 @@ def discriminator(x, reuse=False):
     if reuse:
         tf.get_variable_scope().reuse_variables()
     
-    last_layer = mlp(x)
+    last_layer = mlp_dec(x)
     output = fully_connected(last_layer, 1, weights_initializer=he_init, scope='None7',activation_fn=None)
     return output
 
@@ -385,17 +432,20 @@ with tf.variable_scope('Discriminator'):
 
 with tf.name_scope("ae_loss"):
     autoencoder_loss = tf.reduce_mean(tf.square(x_input - decoder_output))
-
+    
 with tf.name_scope("dc_loss"):
     dc_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(d_real), logits=d_real))
     dc_loss_blanket = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(d_blanket), logits=d_blanket))
-    dc_loss = dc_loss_blanket + dc_loss_real
+    dc_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(d_fake), logits=d_fake))
+    dc_loss = dc_loss_blanket + dc_loss_real+dc_loss_fake
 
 with tf.name_scope("ge_loss"):
     #Out of Target penalty
-    OoT_penalty =0.1*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(d_fake), logits=d_fake))
-    dens = 0.01*density(encoder_output,0.1)
-    generator_loss = autoencoder_loss+OoT_penalty+dens #not sure why it averages out
+    OoT_penalty =0.0005*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(d_fake), logits=d_fake))
+    dens = 0.0001*density(encoder_output,0.1) # density. This dodes not work to spread codes. dc should work.
+    dist_to_target = 0.001*tf.reduce_max(cdist(encoder_output, real_distribution,agg='min'))
+        #it tend to become thin line compared to OoT only, since it looks at the original density.
+    generator_loss = autoencoder_loss+OoT_penalty+dist_to_target #not sure why it averages out
 
 #optimizer
 all_variables = tf.trainable_variables()
@@ -423,6 +473,7 @@ dc_sm = tf.summary.scalar(name='Discriminator_Loss', tensor=dc_loss)
 ge_sm = tf.summary.scalar(name='Generator_Loss', tensor=generator_loss)
 oot_sm = tf.summary.scalar(name='OoT_penalty', tensor=OoT_penalty)
 den_sm = tf.summary.scalar(name='Density', tensor=dens)
+dtt_sm = tf.summary.scalar(name='dist_to_target', tensor=dist_to_target)
 
 summary_op = tf.summary.merge_all()
 
@@ -440,12 +491,28 @@ def tb_init(sess): # create tb path, model path and return tb writer and saved m
     writer = tf.summary.FileWriter(logdir=tensorboard_path, graph=sess.graph)  
     return writer, saved_model_path
 
+def tb_write(sess,n_batches):
+    batch_x, _ = mnist.train.next_batch(dc_fake_batch_size)
+    idx = random.sample(range(mnist[0].num_examples),dc_real_batch_size)
+    z_real_batch = z_real_dist[idx,:]
+    dc_loss_v,ge_loss_v,ae_loss_v,OoT_pen_v,dtt_v,dc_summary,ge_summary,ae_summary,oot_summary,den_summary,dtt_summary \
+        = sess.run([dc_loss,generator_loss,autoencoder_loss,OoT_penalty,dist_to_target,dc_sm, ge_sm, ae_sm,oot_sm,den_sm,dtt_sm] \
+        ,feed_dict={is_training:False, x_input: batch_x,real_distribution:z_real_batch,unif_distribution:blanket})
+    tqdm.write("Batch Per Epoch: {} , Generator Loss:{},Descriminator Loss:{}".format(n_batches,ge_loss_v,dc_loss_v))
+    tqdm.write("dc_loss:{},ae_loss:{},OoT_pen:{},DTT:{}".format(dc_loss_v,ae_loss_v,OoT_pen_v,dtt_v))
+    writer.add_summary(ae_summary, global_step=step)
+    writer.add_summary(dc_summary, global_step=step)
+    writer.add_summary(ge_summary, global_step=step)
+    writer.add_summary(oot_summary, global_step=step)
+    writer.add_summary(dtt_summary, global_step=step)
+    writer.add_summary(den_summary, global_step=step)
+    
 with tf.Session() as sess:
     if mode != 0: # some kind of training
         writer,saved_model_path = tb_init(sess)   
         _,_,blanket = get_blanket(blanket_resolution)
         z_real_dist = gaussian_mixture(55000, z_dim, n_leaves)
-        idx = random.sample(range(mnist[0].num_examples),dc_batch_size)
+        idx = random.sample(range(mnist[0].num_examples),dc_real_batch_size)
         z_real_batch = z_real_dist[idx,:]
     if mode==1 or mode==-1: # Autoencoder training mode
         print("-------1: Autoencoder Training Mode--------")
@@ -478,14 +545,14 @@ with tf.Session() as sess:
         show_discriminator(sess)
         
         for i in tqdm(range(n_step_dc)):
-            sess.run(discriminator_optimizer, feed_dict={is_training:True ,real_distribution: z_real_batch
-                                                     ,unif_distribution:blanket })
+            batch_x, _ = mnist.train.next_batch(dc_fake_batch_size)
+            sess.run(discriminator_optimizer, feed_dict={is_training:True ,x_input: batch_x,real_distribution:z_real_batch,unif_distribution:blanket })
             if i % 10 == 0:
                 loss,summary = sess.run([dc_loss, dc_sm],
-                                            feed_dict={is_training:False, unif_distribution:blanket
-                                                     ,real_distribution: z_real_batch})
+                                            feed_dict={is_training:False, x_input: batch_x,unif_distribution:blanket,real_distribution:z_real_batch})
                 writer.add_summary(summary, global_step=step)
-                tqdm.write("Batch {} / {}, Descriminator Loss:{}".format(i,n_step_dc,loss))
+                show_discriminator(sess)
+                tqdm.write("Batch {} / {}, Descriminator Loss:{}".format(i,n_step_dc,loss)) 
             step += 1
         show_discriminator(sess)
         saver.save(sess, save_path=saved_model_path, global_step=step, write_meta_graph = save_metagraph)
@@ -497,31 +564,31 @@ with tf.Session() as sess:
         show_discriminator(sess)
         show_latent_code(sess)   
         for i in range(n_epochs_ge):
-            n_batches = int(mnist.train.num_examples / ge_batch_size)
-            batch_x, _ = mnist.train.next_batch(ge_batch_size)
-            z_real_small_batch = z_real_dist[random.sample(range(mnist[0].num_examples),100),:]
-            ae_loss,OoT_pen = sess.run([autoencoder_loss, OoT_penalty],feed_dict={is_training:False, x_input: batch_x,real_distribution:z_real_small_batch})
-            ge_OoT_weight = ae_loss / (OoT_pen+0.0000001)
-            print("ge_OoT_weight:{},ae_loss:{},OoT_pen:{}".format(ge_OoT_weight,ae_loss,OoT_pen))
-            print("------------------Epoch {}/{}------------------".format(i, n_epochs_ge))
+            print("------------------Epoch {}/{} Descriminator------------------".format(i, n_epochs_ge))
+            n_batches = int(mnist.train.num_examples / dc_fake_batch_size)
+            tb_write(sess,n_batches)
             for b in tqdm(range(n_batches)):
-                batch_x, _ = mnist.train.next_batch(ge_batch_size)
-                z_real_small_batch = z_real_dist[random.sample(range(mnist[0].num_examples),100),:]
-                sess.run(generator_optimizer, feed_dict={is_training:True, x_input: batch_x, real_distribution:z_real_small_batch})
-                if b % 50 == 0:
-                    loss,ge_summary,ae_summary,oot_summary,den_summary \
-                        = sess.run([generator_loss, ge_sm, ae_sm,oot_sm,den_sm] \
-                        ,feed_dict={is_training:False, x_input: batch_x,real_distribution:z_real_small_batch})
-                    tqdm.write("Batch {} / {}, Generator Loss:{}".format(b,n_batches,loss))
-                    writer.add_summary(ge_summary, global_step=step)
-                    writer.add_summary(ae_summary, global_step=step)
-                    writer.add_summary(oot_summary, global_step=step)
-                    writer.add_summary(den_summary, global_step=step)
+                batch_x, _ = mnist.train.next_batch(dc_fake_batch_size)
+                idx = random.sample(range(mnist[0].num_examples),dc_real_batch_size)
+                z_real_batch = z_real_dist[idx,:]
+                sess.run([discriminator_optimizer],feed_dict=\
+                 {is_training:True, x_input: batch_x, real_distribution:z_real_batch,unif_distribution:blanket })
+                step += 1
+            show_discriminator(sess)
+            show_latent_code(sess)
+            
+            print("------------------Epoch {}/{} Generator------------------".format(i, n_epochs_ge))
+            tb_write(sess,n_batches)
+            for b in tqdm(range(n_batches*n_ge_epoch_booster)):
+                batch_x, _ = mnist.train.next_batch(dc_fake_batch_size)
+                idx = random.sample(range(mnist[0].num_examples),dc_real_batch_size)
+                z_real_batch = z_real_dist[idx,:]
+                sess.run([generator_optimizer],feed_dict=\
+                 {is_training:True, x_input: batch_x, real_distribution:z_real_batch,unif_distribution:blanket })
                 step += 1
             # showing graphs afer the training of an epoch
-            if i % 10 == 0:
-                show_latent_code(sess) 
-        show_latent_code(sess) 
+            show_discriminator(sess)
+            show_latent_code(sess)
         saver.save(sess, save_path=saved_model_path, global_step=step, write_meta_graph = save_metagraph)
     if mode != 0: # some kind of training
         writer.close()
