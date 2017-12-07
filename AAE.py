@@ -3,11 +3,11 @@
 Created on Thu Nov 16 11:50:32 2017
 ref: https://github.com/Naresh1318/Adversarial_Autoencoder
 @author: mtodaka
-:refactoring
-:speed up
 
-:latent, flower, supervised
 :latent, flower, semi-supervised 
+:latent, unsupervised
+:latent, semi-supervised
+:latent, semi-supervised round shape
 
 : learning rate schedule
 : early stopping
@@ -19,47 +19,36 @@ ref: https://github.com/Naresh1318/Adversarial_Autoencoder
 : l2 
 : max-norm regularization
 : BN, heavy and did not work. want to try again?
-
 : ae train by layers
 : ae pretrain, then semi-supervised?
 :pre train layer by layers, then final training.
-
 :group the dense layer naming
-
-:run the code on EC2 GPU
-:latent, unsupervised
-:latent, semi-supervised
-:latent, semi-supervised round shape
-
 :feed mode to run ./file
-
 :param tuning, batch size?
-:transfer learning
 """
 
 """
 modes:
--1: Running modes 1 to 2.
-1: Discriminator Training. Need latest saved model from 1.
+1: Discriminator Training. Just to understand the dynamics.
 2: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
-   Need latest saved model from 2.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
 # you may want to change these to control your experiments
-exptitle =  '10Lf' #experiment title that goes in tensorflow folder name
-mode= 0
-flg_graph = True # showing graphs or not during the training. Showing graphs significantly slows down the training.
+exptitle =  '10Lf_refactored' #experiment title that goes in tensorflow folder name
+moderestore = ''
+mode= -1
+flg_graph = True# showing graphs or not during the training. Showing graphs significantly slows down the training.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
 OoTWeight = 0.01 # out of target weight in generator
 DtTWeight = 0.001 # distance to target weight
-n_latent_sample = 55000 # latent code visualization sample
-n_step_dc = 10*n_leaves # mode 2, descriminator training steps
-n_epochs_ge = 20*n_leaves # mode 3, generator training epochs
+n_latent_sample = 5000 # latent code visualization sample
+n_step_dc = 0*n_leaves # mode 2, descriminator training steps
+n_epochs_ge = 18*n_leaves # mode 3, generator training epochs
 ac_batch_size = 100  # autoencoder training batch size
 import numpy as np
 blanket_resolution = 100*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
-dc_real_batch_size = int(blanket_resolution*blanket_resolution/10) # descriminator training real dist samplling batch size
-dc_fake_batch_size = int(dc_real_batch_size/4) # generator batch size for autoencoder and fake
+dc_real_batch_size = int(blanket_resolution*blanket_resolution/5) # descriminator training real dist samplling batch size
+#dc_fake_batch_size = int(dc_real_batch_size/4) # generator batch size for autoencoder and fake
 
 import tensorflow as tf
 from tensorflow.contrib.layers import fully_connected
@@ -253,6 +242,17 @@ def mlp_dec(x): # multi layer perceptron
         elu1 = fully_connected(elu2, n_l1,scope='elu1')
     return elu1
 
+def mlp_descriminator(x): # multi layer perceptron
+    with tf.contrib.framework.arg_scope(
+            [fully_connected],
+            weights_initializer=he_init):
+        relu1 = fully_connected(x, 50,scope='relu1')
+        relu2 = fully_connected(relu1, 100,scope='relu2')
+        relu3 = fully_connected(relu2, 150,scope='relu3')
+        relu4 = fully_connected(relu3, 200,scope='relu4')
+        relu5 = fully_connected(relu4, 250,scope='relu5')
+    return relu5
+
 def encoder(x, reuse=False):
     """
     Encoder part of the autoencoder.
@@ -321,18 +321,17 @@ def gaussian_mixture(batchsize, ndim, num_leaves):
             z[batch, zi*2:zi*2+2] = sample(x[batch, zi], y[batch, zi], random.randint(0, num_leaves - 1), num_leaves)
     return z
 
-def model_restore(saver,pmode):
-    if pmode == -1 or pmode == 0: # running all or show results -> get the latest one
-        all_results = [path for path in os.listdir(results_path)] 
+def model_restore(saver,pmode,mname=''):
+    if pmode == -1 or pmode == 0: # running all or show results -> get the specified model or ese latest one
+        if len(mname) > 0:
+            all_results = [mname]
+        else:
+            all_results = [path for path in os.listdir(results_path)] 
     else: # get previous mode
         all_results = [path for path in os.listdir(results_path) if '_'+str(pmode-1)+'_' in path or '_-1_' in path] 
     all_results.sort()
     saver.restore(sess, save_path=tf.train.latest_checkpoint(results_path + '/' + all_results[-1] + '/Saved_models/'))
-    if all_results[-1][15:16] == '-': # if it is restored from -1, then the graph is already there
-        save_metagraph = False
-    else:
-        save_metagraph = True
-    return save_metagraph
+
 
 def cdist(A,B,agg):
     # combinatory distance
@@ -419,7 +418,7 @@ def tb_init(sess): # create tb path, model path and return tb writer and saved m
     return writer, saved_model_path
 
 def tb_write(sess):
-    batch_x, _ = mnist.train.next_batch(dc_fake_batch_size)
+    batch_x, _ = mnist.train.next_batch(ac_batch_size)
     idx = random.sample(range(mnist[0].num_examples),dc_real_batch_size)
     z_real_batch = z_real_dist[idx,:]
     dc_loss_v,ge_loss_v,ae_loss_v,OoT_pen_v,dtt_v,sm \
@@ -434,16 +433,16 @@ with tf.Session() as sess:
         writer,saved_model_path = tb_init(sess)   
         _,_,blanket = get_blanket(blanket_resolution)
         z_real_dist = gaussian_mixture(55000, z_dim, n_leaves)
-        idx = random.sample(range(mnist[0].num_examples),dc_real_batch_size)
-        z_real_batch = z_real_dist[idx,:]
-    if mode==2 or mode==-1: # Descriminator training mode
-        print("-------Descriminator Pre-Training--------")    
+    if mode==1: # Descriminator training mode
+        print("-------Descriminator Training--------")    
         show_inout(sess, op=decoder_output)  
         show_latent_code(sess,n_latent_sample)     
         show_real_dist(z_real_dist)
         show_discriminator(sess)
+        batch_x, _ = mnist.train.next_batch(0)
         for i in tqdm(range(n_step_dc)):
-            batch_x, _ = mnist.train.next_batch(dc_fake_batch_size)
+            idx = random.sample(range(mnist[0].num_examples),dc_real_batch_size)
+            z_real_batch = z_real_dist[idx,:]
             sess.run(discriminator_optimizer, feed_dict={is_training:True ,x_input: batch_x,real_distribution:z_real_batch,unif_distribution:blanket })
             if i % 10 == 0:
                 dc_loss_v,dc_summary = sess.run([dc_loss, dc_sm],
@@ -454,16 +453,15 @@ with tf.Session() as sess:
             step += 1
         show_discriminator(sess)
         saver.save(sess, save_path=saved_model_path, global_step=step, write_meta_graph = True)
-    if mode==3 or mode==-1: # Latent regulation
-        #restoring the result from the privious mode
-        save_metagraph = model_restore(saver,mode)
+    if mode==2: # Latent regulation
         n_batches = int(mnist.train.num_examples / ac_batch_size)
         for i in range(n_epochs_ge):
             print("------------------Epoch {}/{} ------------------".format(i, n_epochs_ge))
             for b in tqdm(range(n_batches)):    
                 #Autoencoder
-                batch_x, _ = mnist.train.next_batch(ac_batch_size)
+                    
                 #Discriminator
+                batch_x, _ = mnist.train.next_batch(ac_batch_size)    
                 idx = random.sample(range(mnist[0].num_examples),dc_real_batch_size)
                 z_real_batch = z_real_dist[idx,:]
                 sess.run([discriminator_optimizer],feed_dict=\
@@ -476,11 +474,11 @@ with tf.Session() as sess:
                     show_latent_code(sess,n_latent_sample)
                     tb_write(sess)
                 step += 1
-        saver.save(sess, save_path=saved_model_path, global_step=step, write_meta_graph = save_metagraph)
+        saver.save(sess, save_path=saved_model_path, global_step=step, write_meta_graph = True)
     if mode != 0: # some kind of training
         writer.close()
     if mode==0: # showing the latest model result. InOut, true dist, discriminator, latent dist.
-        model_restore(saver,mode)
+        model_restore(saver,mode,moderestore)
         show_inout(sess, op=decoder_output) 
         z_real_dist = gaussian_mixture(55000, z_dim, n_leaves)
         show_real_dist(z_real_dist)
