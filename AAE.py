@@ -34,10 +34,11 @@ modes:
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
 # you may want to change these to control your experiments
-exptitle =  '10Lf_refactored' #experiment title that goes in tensorflow folder name
+exptitle =  '10lf_lowlogfq_tbsampleinc' #experiment title that goes in tensorflow folder name
+# '10Lf_dcreal15' '10Lf_dcpre'
 moderestore = ''
-mode= -1
-flg_graph = True# showing graphs or not during the training. Showing graphs significantly slows down the training.
+mode= 2
+flg_graph = False# showing graphs or not during the training. Showing graphs significantly slows down the training.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
 OoTWeight = 0.01 # out of target weight in generator
 DtTWeight = 0.001 # distance to target weight
@@ -45,10 +46,12 @@ n_latent_sample = 5000 # latent code visualization sample
 n_step_dc = 0*n_leaves # mode 2, descriminator training steps
 n_epochs_ge = 18*n_leaves # mode 3, generator training epochs
 ac_batch_size = 100  # autoencoder training batch size
+tb_batch_size = 800  # x_inputs batch size for tb
+tb_log_step = 200 # tb logging step
+flg_console_log = False # console logging swtich
 import numpy as np
 blanket_resolution = 100*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
-dc_real_batch_size = int(blanket_resolution*blanket_resolution/5) # descriminator training real dist samplling batch size
-#dc_fake_batch_size = int(dc_real_batch_size/4) # generator batch size for autoencoder and fake
+dc_real_batch_size = int(blanket_resolution*blanket_resolution/10) # descriminator training real dist samplling batch size
 
 import tensorflow as tf
 from tensorflow.contrib.layers import fully_connected
@@ -373,7 +376,7 @@ with tf.name_scope("ge_loss"):
     #Out of Target penalty
     OoT_penalty =OoTWeight*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(d_fake), logits=d_fake))
     dist_to_target = DtTWeight*tf.reduce_max(cdist(encoder_output, real_distribution,agg='min'))
-    generator_loss = autoencoder_loss+OoT_penalty+dist_to_target #not sure why it averages out
+    generator_loss = autoencoder_loss+OoT_penalty #not sure why it averages out
 
 #optimizer
 all_variables = tf.trainable_variables()
@@ -418,14 +421,17 @@ def tb_init(sess): # create tb path, model path and return tb writer and saved m
     return writer, saved_model_path
 
 def tb_write(sess):
-    batch_x, _ = mnist.train.next_batch(ac_batch_size)
+    batch_x, _ = mnist.train.next_batch(tb_batch_size)
     idx = random.sample(range(mnist[0].num_examples),dc_real_batch_size)
     z_real_batch = z_real_dist[idx,:]
-    dc_loss_v,ge_loss_v,ae_loss_v,OoT_pen_v,dtt_v,sm \
-        = sess.run([dc_loss,generator_loss,autoencoder_loss,OoT_penalty,dist_to_target,summary_op] \
-        ,feed_dict={is_training:False, x_input: batch_x,real_distribution:z_real_batch,unif_distribution:blanket})
-    tqdm.write("ae_loss:{0:.5f},dc_loss:{1:.5f},Generator Loss:{2:.5f},OoT_pen:{3:.5f},DTT:{4:.5f}"\
-               .format(ae_loss_v,dc_loss_v,ge_loss_v,OoT_pen_v,dtt_v))
+#    if flg_console_log:
+#        dc_loss_v,ge_loss_v,ae_loss_v,OoT_pen_v,dtt_v,sm \
+#            = sess.run([dc_loss,generator_loss,autoencoder_loss,OoT_penalty,dist_to_target,summary_op] \
+#            ,feed_dict={is_training:False, x_input: batch_x,real_distribution:z_real_batch,unif_distribution:blanket})
+#        tqdm.write("ae_loss:{0:.5f},dc_loss:{1:.5f},Generator Loss:{2:.5f},OoT_pen:{3:.5f},DTT:{4:.5f}"\
+#               .format(ae_loss_v,dc_loss_v,ge_loss_v,OoT_pen_v,dtt_v))
+#    else:
+    sm = sess.run(summary_op,feed_dict={is_training:False, x_input: batch_x,real_distribution:z_real_batch,unif_distribution:blanket})
     writer.add_summary(sm, global_step=step)
 
 with tf.Session() as sess:
@@ -444,7 +450,7 @@ with tf.Session() as sess:
             idx = random.sample(range(mnist[0].num_examples),dc_real_batch_size)
             z_real_batch = z_real_dist[idx,:]
             sess.run(discriminator_optimizer, feed_dict={is_training:True ,x_input: batch_x,real_distribution:z_real_batch,unif_distribution:blanket })
-            if i % 10 == 0:
+            if i % tb_log_step == 0:
                 dc_loss_v,dc_summary = sess.run([dc_loss, dc_sm],
                                             feed_dict={is_training:False, x_input: batch_x,unif_distribution:blanket,real_distribution:z_real_batch})
                 writer.add_summary(dc_summary, global_step=step)
@@ -469,7 +475,7 @@ with tf.Session() as sess:
                 #Generator
                 sess.run([generator_optimizer],feed_dict=\
                  {is_training:True, x_input: batch_x,real_distribution:z_real_batch})
-                if b % 10 == 0:
+                if b % tb_log_step == 0:
                     show_discriminator(sess)
                     show_latent_code(sess,n_latent_sample)
                     tb_write(sess)
