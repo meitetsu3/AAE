@@ -34,11 +34,11 @@ modes:
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
 # you may want to change these to control your experiments
-exptitle =  '10lf_lowlogfq_tbsampleinc' #experiment title that goes in tensorflow folder name
-# '10Lf_dcreal15' '10Lf_dcpre'
+exptitle =  '10Lf_dcreal15' #experiment title that goes in tensorflow folder name
+
 moderestore = ''
-mode= 2
-flg_graph = False# showing graphs or not during the training. Showing graphs significantly slows down the training.
+mode= 0
+flg_graph = True # showing graphs or not during the training. Showing graphs significantly slows down the training.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
 OoTWeight = 0.01 # out of target weight in generator
 DtTWeight = 0.001 # distance to target weight
@@ -51,7 +51,7 @@ tb_log_step = 200 # tb logging step
 flg_console_log = False # console logging swtich
 import numpy as np
 blanket_resolution = 100*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
-dc_real_batch_size = int(blanket_resolution*blanket_resolution/10) # descriminator training real dist samplling batch size
+dc_real_batch_size = int(blanket_resolution*blanket_resolution/15) # descriminator training real dist samplling batch size
 
 import tensorflow as tf
 from tensorflow.contrib.layers import fully_connected
