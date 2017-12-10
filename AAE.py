@@ -34,7 +34,7 @@ modes:
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
 # you may want to change these to control your experiments
-exptitle =  '10Lf_dcreal15' #experiment title that goes in tensorflow folder name
+exptitle =  '10Lf' #experiment title that goes in tensorflow folder name
 
 moderestore = ''
 mode= 0
@@ -50,7 +50,7 @@ tb_batch_size = 800  # x_inputs batch size for tb
 tb_log_step = 200 # tb logging step
 flg_console_log = False # console logging swtich
 import numpy as np
-blanket_resolution = 100*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
+blanket_resolution = 10*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
 dc_real_batch_size = int(blanket_resolution*blanket_resolution/15) # descriminator training real dist samplling batch size
 
 import tensorflow as tf
@@ -58,7 +58,7 @@ from tensorflow.contrib.layers import fully_connected
 from datetime import datetime
 import os
 import matplotlib
-matplotlib.use('GTKAgg') # to speed up graphing
+#matplotlib.use('GTKAgg') # to speed up graphing
 import matplotlib.pyplot as plt
 from tensorflow.examples.tutorials.mnist import input_data
 import random
