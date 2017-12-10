@@ -36,7 +36,7 @@ modes:
 # you may want to change these to control your experiments
 exptitle =  '10Lf' #experiment title that goes in tensorflow folder name
 
-moderestore = ''
+moderestore = '20171210131913_2_10Lf_realbs40'
 mode= 0
 flg_graph = True # showing graphs or not during the training. Showing graphs significantly slows down the training.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
@@ -51,7 +51,7 @@ tb_log_step = 200 # tb logging step
 flg_console_log = False # console logging swtich
 import numpy as np
 blanket_resolution = 10*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
-dc_real_batch_size = int(blanket_resolution*blanket_resolution/15) # descriminator training real dist samplling batch size
+dc_real_batch_size = int(blanket_resolution*blanket_resolution/40) # descriminator training real dist samplling batch size
 
 import tensorflow as tf
 from tensorflow.contrib.layers import fully_connected
