@@ -13,9 +13,7 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-# you may want to change these to control your experiments
-
-exptitle =  '10Lf_sup_ref1' #experiment title that goes in tensorflow folder name
+exptitle =  '10Lf_sup_ref2' #experiment title that goes in tensorflow folder name
 mode= 1
 flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
@@ -61,14 +59,14 @@ mnist = input_data.read_data_sets('./Data', one_hot=True)
 # Placeholders for input data and the targets
 x_input = tf.placeholder(dtype=tf.float32, shape=[None, input_dim], name='Input')
 real_distribution = tf.placeholder(dtype=tf.float32, shape=[None, z_dim], name='Real_distribution')
-real_lbl = tf.placeholder(dtype=tf.float32, shape=[None,1],name = 'Real_lbl')
-fake_lbl = tf.placeholder(dtype=tf.float32, shape=[None,1],name = 'Fake_lbl')
-unif_d = tf.placeholder(dtype=tf.float32, shape=[None,1],name = 'Uniform_d')
+real_lbl = tf.placeholder(dtype=tf.float32, shape=[None,1],name = 'Real_lable')
+fake_lbl = tf.placeholder(dtype=tf.float32, shape=[None,1],name = 'Fake_lable')
+unif_d = tf.placeholder(dtype=tf.float32, shape=[None,1],name = 'Uniform_digits')
 unif_z = tf.placeholder(dtype=tf.float32, shape=[blanket_resolution*blanket_resolution, z_dim], name='Uniform_z')
 
 he_init = tf.contrib.layers.variance_scaling_initializer(mode="FAN_AVG")
 """
-Functions
+Util Functions
 """
 def form_results():
     """
@@ -86,6 +84,30 @@ def form_results():
         os.makedirs(log_path)
     return tensorboard_path, saved_model_path, log_path
 
+def get_blanket(resolution):
+    resolution = resolution
+    xlist = np.linspace(xLU[0], xLU[1], resolution,dtype="float32")
+    ylist = np.linspace(yLU[0], yLU[1], resolution,dtype="float32")
+    blanket = np.empty((resolution*resolution,2), dtype="float32")
+    for i in range(resolution):
+        for j in range(resolution):
+            blanket[i*resolution+j]=[xlist[j],ylist[i]]
+    return xlist,ylist,blanket
+
+def model_restore(saver,pmode,mname=''):
+    if pmode == -1 or pmode == 0: # running all or show results -> get the specified model or ese latest one
+        if len(mname) > 0:
+            all_results = [mname]
+        else:
+            all_results = [path for path in os.listdir(results_path)] 
+    else: # get previous mode
+        all_results = [path for path in os.listdir(results_path) if '_'+str(pmode-1)+'_' in path or '_-1_' in path] 
+    all_results.sort()
+    saver.restore(sess, save_path=tf.train.latest_checkpoint(results_path + '/' + all_results[-1] + '/Saved_models/'))
+          
+"""
+Vis Functions
+"""
 def show_inout(sess,op):
     """
     Shows input MNIST image and reconstracted image.
@@ -178,16 +200,6 @@ def show_discriminator(sess,digit):
     plt.show()   
     plt.close()
     
-def get_blanket(resolution):
-    resolution = resolution
-    xlist = np.linspace(xLU[0], xLU[1], resolution,dtype="float32")
-    ylist = np.linspace(yLU[0], yLU[1], resolution,dtype="float32")
-    blanket = np.empty((resolution*resolution,2), dtype="float32")
-    for i in range(resolution):
-        for j in range(resolution):
-            blanket[i*resolution+j]=[xlist[j],ylist[i]]
-    return xlist,ylist,blanket
-            
 def show_real_dist(z_real_dist, real_lbl_ins):
     """
     Shows real distribution
@@ -196,7 +208,7 @@ def show_real_dist(z_real_dist, real_lbl_ins):
     """
     if not flg_graph:
         return
-    plt.rc('figure', figsize=(8, 8))
+    plt.rc('figure', figsize=(6, 5))
     plt.tight_layout()
     fig, ax = plt.subplots(1)
     cm = matplotlib.colors.ListedColormap(myColor)
@@ -215,9 +227,9 @@ def show_real_dist(z_real_dist, real_lbl_ins):
     plt.show()
     plt.close()
 
-
-def leaky_relu(z, name=None):
-    return tf.maximum(0.01 * z, z, name=name)
+"""
+model Functions
+"""
 
 def mlp_enc(x): # multi layer perceptron
     with tf.contrib.framework.arg_scope(
@@ -234,17 +246,6 @@ def mlp_dec(x): # multi layer perceptron
         elu2 = fully_connected(x, n_l2,scope='elu2')
         elu1 = fully_connected(elu2, n_l1,scope='elu1')
     return elu1
-
-def mlp_descriminator(x): # multi layer perceptron
-    with tf.contrib.framework.arg_scope(
-            [fully_connected],
-            weights_initializer=he_init):
-        relu1 = fully_connected(x, 50,scope='relu1')
-        relu2 = fully_connected(relu1, 100,scope='relu2')
-        relu3 = fully_connected(relu2, 150,scope='relu3')
-        relu4 = fully_connected(relu3, 200,scope='relu4')
-        relu5 = fully_connected(relu4, 250,scope='relu5')
-    return relu5
 
 def encoder(x, reuse=False):
     """
@@ -294,7 +295,6 @@ def gaussian_mixture(batchsize, num_leaves, sel):
     :sel: selector. 0 means all leaves.
     :return: tensor of shape [batch_size, 2]. I think it's better to take sigmoid here.
     """
-
     def sample(x, y, label, num_leaves):
         shift = 1.7
         r = 2.0 * np.pi / float(num_leaves) * float(label)
@@ -314,30 +314,6 @@ def gaussian_mixture(batchsize, num_leaves, sel):
             s = np.random.randint(0, num_leaves) if sel[batch] == -1 else sel[batch]
             z[batch, zi*2:zi*2+2] = sample(x[batch, zi], y[batch, zi], s, num_leaves)
     return z
-
-def model_restore(saver,pmode,mname=''):
-    if pmode == -1 or pmode == 0: # running all or show results -> get the specified model or ese latest one
-        if len(mname) > 0:
-            all_results = [mname]
-        else:
-            all_results = [path for path in os.listdir(results_path)] 
-    else: # get previous mode
-        all_results = [path for path in os.listdir(results_path) if '_'+str(pmode-1)+'_' in path or '_-1_' in path] 
-    all_results.sort()
-    saver.restore(sess, save_path=tf.train.latest_checkpoint(results_path + '/' + all_results[-1] + '/Saved_models/'))
-
-
-def cdist(A,B,agg):
-    # combinatory distance
-    # for each row in A, measure the euclidian distance with all the other rows in B, take min or avg
-    Bmod = tf.tile(tf.expand_dims(B,0),[tf.shape(A)[0],1,1])
-    Amod = tf.tile(tf.expand_dims(A,1),[1,tf.shape(B)[0],1])
-    sdif = tf.squared_difference(Amod,Bmod)
-    if agg=='min':
-        rtn = tf.reduce_min(tf.sqrt(tf.reduce_sum(sdif,axis=2)),axis=1)
-    if agg=='mean':
-        rtn = tf.reduce_mean(tf.reduce_sum(sdif,axis=2),axis=1) # optimizer generate nan if this take sqrt
-    return rtn
             
 """
 Defining key operations, Loess, Optimizer and other necessary operations
@@ -394,7 +370,6 @@ ae_sm = tf.summary.scalar(name='Autoencoder_Loss', tensor=autoencoder_loss)
 dc_sm = tf.summary.scalar(name='Discriminator_Loss', tensor=dc_loss)
 ge_sm = tf.summary.scalar(name='Generator_Loss', tensor=generator_loss)
 oot_sm = tf.summary.scalar(name='OoT_penalty', tensor=OoT_penalty)
-#dtt_sm = tf.summary.scalar(name='dist_to_target', tensor=dist_to_target)
 summary_op = tf.summary.merge_all()
 
 # Creating saver and get ready
