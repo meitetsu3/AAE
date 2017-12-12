@@ -34,18 +34,18 @@ modes:
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
 # you may want to change these to control your experiments
-exptitle =  '10Lf' #experiment title that goes in tensorflow folder name
+exptitle =  '10Lf_bs100' #experiment title that goes in tensorflow folder name
 
-moderestore = '20171210131913_2_10Lf_realbs40'
-mode= 0
-flg_graph = True # showing graphs or not during the training. Showing graphs significantly slows down the training.
+moderestore = '20171210143929_2_10Lf_base'
+mode= 2
+flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
 OoTWeight = 0.01 # out of target weight in generator
 DtTWeight = 0.001 # distance to target weight
 n_latent_sample = 5000 # latent code visualization sample
 n_step_dc = 0*n_leaves # mode 2, descriminator training steps
-n_epochs_ge = 18*n_leaves # mode 3, generator training epochs
-ac_batch_size = 100  # autoencoder training batch size
+n_epochs_ge = 45*n_leaves # mode 3, generator training epochs
+ac_batch_size = 160  # autoencoder training batch size
 tb_batch_size = 800  # x_inputs batch size for tb
 tb_log_step = 200 # tb logging step
 flg_console_log = False # console logging swtich
