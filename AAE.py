@@ -34,6 +34,7 @@ modes:
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
 # you may want to change these to control your experiments
+
 exptitle =  '10Lf_sup_ref2' #experiment title that goes in tensorflow folder name
 moderestore = ''
 mode= 1
