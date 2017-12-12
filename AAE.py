@@ -35,10 +35,10 @@ modes:
 """
 # you may want to change these to control your experiments
 
-exptitle =  '10Lf_sup_ref2' #experiment title that goes in tensorflow folder name
+exptitle =  '10Lf_sup' #experiment title that goes in tensorflow folder name
 moderestore = ''
-mode= 1
-flg_graph = True # showing graphs or not during the training. Showing graphs significantly slows down the training.
+mode= 2
+flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
 OoTWeight = 0.01 # out of target weight in generator
 DtTWeight = 0.001 # distance to target weight
@@ -147,7 +147,7 @@ def show_latent_code(sess,spc):
     """
     if not flg_graph:
         return
-    plt.rc('figure', figsize=(10, 10))
+    plt.rc('figure', figsize=(8, 8))
     plt.tight_layout()
     
     with tf.variable_scope("Encoder"):
@@ -169,7 +169,7 @@ def show_latent_code(sess,spc):
     plt.show()
     plt.close()
     
-def show_discriminator(sess):
+def show_discriminator(sess,digit):
     """
     Shows discriminator activation contour plot. Close to 1 means estimated as positive (true dist).
     Parameters. seess:TF session.
@@ -179,14 +179,14 @@ def show_discriminator(sess):
         return
     br = dc_contour_res_x*blanket_resolution
     xlist, ylist, blanket = get_blanket(br)
-    
+    digit_v = np.repeat(np.float32(digit),len(blanket)).reshape(len(blanket),1)
     plt.rc('figure', figsize=(6, 5))
     plt.tight_layout()
     
     X, Y = np.meshgrid(xlist, ylist)    
     
     with tf.variable_scope("Discriminator"):
-        desc_result = sess.run(tf.nn.sigmoid(discriminator(blanket, reuse=True)))
+        desc_result = sess.run(tf.nn.sigmoid(discriminator(blanket,digit_v, reuse=True)))
 
     Z = np.empty((br,br), dtype="float32")    
     for i in range(br):
@@ -197,7 +197,7 @@ def show_discriminator(sess):
     cp = ax.contourf(X, Y, Z)
     plt.colorbar(cp)
     ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-    ax.set_title('Descriminator Contour')    
+    ax.set_title('Descriminator Contour for digit '+ str(digit))    
     plt.show()   
     plt.close()
     
@@ -219,7 +219,7 @@ def show_real_dist(z_real_dist, real_lbl_ins):
     """
     if not flg_graph:
         return
-    plt.rc('figure', figsize=(10, 10))
+    plt.rc('figure', figsize=(8, 8))
     plt.tight_layout()
     fig, ax = plt.subplots(1)
     cm = matplotlib.colors.ListedColormap(myColor)
@@ -367,7 +367,7 @@ Defining key operations, Loess, Optimizer and other necessary operations
 """
 with tf.variable_scope('Encoder'):
     encoder_output = encoder(x_input)
-    
+
 with tf.variable_scope('Decoder'):
     decoder_output = decoder(encoder_output)
 
@@ -412,7 +412,7 @@ init = tf.global_variables_initializer()
 input_images = tf.reshape(x_input, [-1, 28, 28, 1])
 generated_images = tf.reshape(decoder_output, [-1, 28, 28, 1])
 
-# Tensorboard visualization
+# Tensorboard visualizationdegit_v
 ae_sm = tf.summary.scalar(name='Autoencoder_Loss', tensor=autoencoder_loss)
 dc_sm = tf.summary.scalar(name='Discriminator_Loss', tensor=dc_loss)
 ge_sm = tf.summary.scalar(name='Generator_Loss', tensor=generator_loss)
@@ -435,17 +435,21 @@ def tb_init(sess): # create tb path, model path and return tb writer and saved m
     return writer, saved_model_path
 
 def tb_write(sess):
-    batch_x, _ = mnist.train.next_batch(tb_batch_size)
-    idx = random.sample(range(mnist[0].num_examples),dc_real_batch_size)
+    batch_x, batch_y = mnist.train.next_batch(tb_batch_size)
+    batch_y_fl = np.expand_dims([np.where(r==1)[0][0] for r in batch_y],1).astype(float)
+                
+    idx = random.sample(range(5000),dc_real_batch_size)
     z_real_batch = z_real_dist[idx,:]
-#    if flg_console_log:
+    real_lbl_batch = np.expand_dims(real_lbl_ins[idx],1)
+#    if flg_console_log:expand_dims
 #        dc_loss_v,ge_loss_v,ae_loss_v,OoT_pen_v,dtt_v,sm \
 #            = sess.run([dc_loss,generator_loss,autoencoder_loss,OoT_penalty,dist_to_target,summary_op] \
 #            ,feed_dict={is_training:False, x_input: batch_x,real_distribution:z_real_batch,unif_distribution:blanket})
 #        tqdm.write("ae_loss:{0:.5f},dc_loss:{1:.5f},Generator Loss:{2:.5f},OoT_pen:{3:.5f},DTT:{4:.5f}"\
 #               .format(ae_loss_v,dc_loss_v,ge_loss_v,OoT_pen_v,dtt_v))
 #    else:
-    sm = sess.run(summary_op,feed_dict={x_input: batch_x,real_distribution:z_real_batch,unif_d:blanket})
+    sm = sess.run(summary_op,feed_dict={x_input: batch_x, real_distribution:z_real_batch,\
+                         unif_z:blanket,real_lbl:real_lbl_batch ,unif_d:unif_digit, fake_lbl:batch_y_fl})
     writer.add_summary(sm, global_step=step)
 
 with tf.Session() as sess:
@@ -459,20 +463,23 @@ with tf.Session() as sess:
         show_inout(sess, op=decoder_output)  
         show_latent_code(sess,n_latent_sample)     
         show_real_dist(z_real_dist,real_lbl_ins)
-        show_discriminator(sess)
+        show_discriminator(sess,0)
+        show_discriminator(sess,5)
+        show_discriminator(sess,9)
+        show_discriminator(sess,-1)
         batch_x, _ = mnist.train.next_batch(0)
         for i in tqdm(range(n_step_dc)):
             idx = random.sample(range(mnist[0].num_examples),dc_real_batch_size)
             z_real_batch = z_real_dist[idx,:]
-            sess.run(discriminator_optimizer, feed_dict={x_input: batch_x,real_distribution:z_real_batch,unif_d:blanket })
+            sess.run(discriminator_optimizer, feed_dict={x_input: batch_x,real_distribution:z_real_batch,unif_z:blanket })
             if i % tb_log_step == 0:
                 dc_loss_v,dc_summary = sess.run([dc_loss, dc_sm],
-                                            feed_dict={x_input: batch_x,unif_d:blanket,real_distribution:z_real_batch})
-                writer.add_summary(dc_summary, global_step=step)
-                show_discriminator(sess)
+                                            feed_dict={x_input: batch_x,unif_z:blanket,real_distribution:z_real_batch})
+                writer.add_summary(dc_summary,                 unif_dglobal_step=step)
+                show_discriminator(sess,-1)
                 tqdm.write("Batch {} / {}, Descriminator Loss:{}".format(i,n_step_dc,dc_loss_v)) 
             step += 1
-        show_discriminator(sess)
+        show_discriminator(sess,-1)
         saver.save(sess, save_path=saved_model_path, global_step=step, write_meta_graph = True)
     if mode==2: # Latent regulation
         n_batches = int(mnist.train.num_examples / ac_batch_size)
@@ -481,14 +488,19 @@ with tf.Session() as sess:
             for b in tqdm(range(n_batches)):    
                 #Autoencoder
                 #Discriminator
-                batch_x, _ = mnist.train.next_batch(ac_batch_size)    
-                idx = random.sample(range(mnist[0].num_examples),dc_real_batch_size)
+                batch_x, batch_y = mnist.train.next_batch(ac_batch_size)    
+                batch_y_fl = np.expand_dims([np.where(r==1)[0][0] for r in batch_y],1).astype(float)
+                
+                idx = random.sample(range(5000),dc_real_batch_size)
                 z_real_batch = z_real_dist[idx,:]
-                sess.run([discriminator_optimizer],feed_dict={x_input: batch_x, real_distribution:z_real_batch,unif_d:blanket })
+                real_lbl_batch = np.expand_dims(real_lbl_ins[idx],1)
+                unif_digit = np.expand_dims(np.random.randint(0,10, size=blanket_resolution*blanket_resolution),1)
+                sess.run([discriminator_optimizer],feed_dict={x_input: batch_x, real_distribution:z_real_batch,\
+                         unif_z:blanket, real_lbl:real_lbl_batch ,unif_d:unif_digit, fake_lbl:batch_y_fl})
                 #Generator
-                sess.run([generator_optimizer],feed_dict={x_input: batch_x})
+                sess.run([generator_optimizer],feed_dict={x_input: batch_x,fake_lbl:batch_y_fl})
                 if b % tb_log_step == 0:
-                    show_discriminator(sess)
+                    show_discriminator(sess,-1)
                     show_latent_code(sess,n_latent_sample)
                     tb_write(sess)
                 step += 1
@@ -500,7 +512,7 @@ with tf.Session() as sess:
         show_inout(sess, op=decoder_output) 
         z_real_dist = gaussian_mixture(5000, n_leaves,)
         show_real_dist(z_real_dist,real_lbl_ins)
-        show_discriminator(sess)    
+        show_discriminator(sess,-1)    
         show_latent_code(sess,n_latent_sample)
     
         
