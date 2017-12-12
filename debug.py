@@ -184,7 +184,7 @@ def gaussian_mixture(batchsize, ndim, num_leaves):
     z = np.empty((batchsize, ndim), dtype=np.float32)
     for batch in range(batchsize):
         for zi in range(ndim // 2):
-            z[batch, zi*2:zi*2+2] = sample(x[batch, zi], y[batch, zi], random.randint(0, num_leaves - 1), num_leaves)
+            z[batch, zi*2:zi*2+2] = sample(x[batch, zi], y[batch, zi], random.randint(0, 10 - 1), num_leaves)
     return z
 
 def density(A,ep):
