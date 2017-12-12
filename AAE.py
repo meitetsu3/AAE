@@ -13,7 +13,7 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  '10Lf_sup_ref2' #experiment title that goes in tensorflow folder name
+exptitle =  '10Lf_sup_ref3' #experiment title that goes in tensorflow folder name
 mode= 1
 flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
@@ -22,7 +22,7 @@ n_leaves = 10 # number of leaves in the mixed 2D Gaussian
 OoTWeight = 0.01 # out of target weight in generator
 DtTWeight = 0.001 # distance to target weight
 n_latent_sample = 5000 # latent code visualization sample
-n_epochs_ge = 45*n_leaves-400 # mode 3, generator training epochs
+n_epochs_ge = 45*n_leaves # mode 3, generator training epochs
 ac_batch_size = 160  # autoencoder training batch size
 tb_batch_size = 800  # x_inputs batch size for tb
 tb_log_step = 200 # tb logging step
@@ -65,6 +65,7 @@ unif_d = tf.placeholder(dtype=tf.float32, shape=[None,1],name = 'Uniform_digits'
 unif_z = tf.placeholder(dtype=tf.float32, shape=[blanket_resolution*blanket_resolution, z_dim], name='Uniform_z')
 
 he_init = tf.contrib.layers.variance_scaling_initializer(mode="FAN_AVG")
+
 """
 Util Functions
 """
@@ -208,7 +209,7 @@ def show_real_dist(z_real_dist, real_lbl_ins):
     """
     if not flg_graph:
         return
-    plt.rc('figure', figsize=(6, 5))
+    plt.rc('figure', figsize=(5, 5))
     plt.tight_layout()
     fig, ax = plt.subplots(1)
     cm = matplotlib.colors.ListedColormap(myColor)
@@ -342,7 +343,6 @@ with tf.name_scope("dc_loss"):
 with tf.name_scope("ge_loss"):
     #Out of Target penalty
     OoT_penalty =OoTWeight*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(d_fake), logits=d_fake))
-    #dist_to_target = DtTWeight*tf.reduce_max(cdist(encoder_output, real_distribution,agg='min'))
     generator_loss = autoencoder_loss+OoT_penalty #not sure why it averages out
 
 #optimizer
@@ -390,39 +390,38 @@ def tb_write(sess):
     batch_x, batch_y = mnist.train.next_batch(tb_batch_size)
     batch_y_fl = np.expand_dims([np.where(r==1)[0][0] for r in batch_y],1).astype(float)
                 
-    idx = random.sample(range(5000),dc_real_batch_size)
-    z_real_batch = z_real_dist[idx,:]
-    real_lbl_batch = np.expand_dims(real_lbl_ins[idx],1)
-
-    sm = sess.run(summary_op,feed_dict={x_input: batch_x, real_distribution:z_real_batch,\
-                         unif_z:blanket,real_lbl:real_lbl_batch ,unif_d:unif_digit, fake_lbl:batch_y_fl})
+    dc_real_lbl = np.expand_dims(np.random.randint(-1,10, size=dc_real_batch_size),1)
+    dc_real_dist = gaussian_mixture(dc_real_batch_size, n_leaves,dc_real_lbl)
+                
+    dc_blanket_digit = np.expand_dims(np.random.randint(-1,10, size=blanket_resolution*blanket_resolution),1)
+                
+    sm = sess.run(summary_op,feed_dict={x_input: batch_x, real_distribution:dc_real_dist,\
+                         unif_z:blanket,real_lbl:dc_real_lbl ,unif_d:dc_blanket_digit, fake_lbl:batch_y_fl})
     writer.add_summary(sm, global_step=step)
 
 with tf.Session() as sess:
     if mode==1: # Latent regulation
         writer,saved_model_path = tb_init(sess)   
         _,_,blanket = get_blanket(blanket_resolution)
-        real_lbl_ins = np.random.randint(-1,10, size=5000)
-        z_real_dist = gaussian_mixture(5000, n_leaves,real_lbl_ins)
         n_batches = int(mnist.train.num_examples / ac_batch_size)
         for i in range(n_epochs_ge):
             print("------------------Epoch {}/{} ------------------".format(i, n_epochs_ge))
             for b in tqdm(range(n_batches)):    
-                #Autoencoder
                 #Discriminator
                 batch_x, batch_y = mnist.train.next_batch(ac_batch_size)    
                 batch_y_fl = np.expand_dims([np.where(r==1)[0][0] for r in batch_y],1).astype(float)
+    
+                dc_real_lbl = np.expand_dims(np.random.randint(-1,10, size=dc_real_batch_size),1)
+                dc_real_dist = gaussian_mixture(dc_real_batch_size, n_leaves,dc_real_lbl)
                 
-                idx = random.sample(range(5000),dc_real_batch_size)
-                z_real_batch = z_real_dist[idx,:]
-                real_lbl_batch = np.expand_dims(real_lbl_ins[idx],1)
-                unif_digit = np.expand_dims(np.random.randint(0,10, size=blanket_resolution*blanket_resolution),1)
-                sess.run([discriminator_optimizer],feed_dict={x_input: batch_x, real_distribution:z_real_batch,\
-                         unif_z:blanket, real_lbl:real_lbl_batch ,unif_d:unif_digit, fake_lbl:batch_y_fl})
+                dc_blanket_digit = np.expand_dims(np.random.randint(-1,10, size=blanket_resolution*blanket_resolution),1)
+                
+                sess.run([discriminator_optimizer],feed_dict={x_input: batch_x, real_distribution:dc_real_dist,\
+                         unif_z:blanket, real_lbl:dc_real_lbl ,unif_d:dc_blanket_digit, fake_lbl:batch_y_fl})
                 #Generator
                 sess.run([generator_optimizer],feed_dict={x_input: batch_x,fake_lbl:batch_y_fl})
                 if b % tb_log_step == 0:
-                    show_discriminator(sess,-1)
+                    show_discriminator(sess,1)
                     show_latent_code(sess,n_latent_sample)
                     tb_write(sess)
                 step += 1
