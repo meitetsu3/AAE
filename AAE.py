@@ -16,10 +16,10 @@ modes:
 exptitle =  '10Lf' #experiment title that goes in tensorflow folder name
 mode= 0
 flg_graph = True # showing graphs or not during the training. Showing graphs significantly slows down the training.
-model_folder = '' # name of the model to be restored. white space means most recent.
+model_folder = '20171212234617_1_10Lf_acbs300' # name of the model to be restored. white space means most recent.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
 n_epochs_ge = 55*n_leaves # mode 3, generator training epochs
-ac_batch_size = 160  # autoencoder training batch size
+ac_batch_size = 300  # autoencoder training batch size
 import numpy as np
 blanket_resolution = 10*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
 dc_real_batch_size = int(blanket_resolution*blanket_resolution/15) # descriminator training real dist samplling batch size
