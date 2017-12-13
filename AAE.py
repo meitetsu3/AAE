@@ -13,22 +13,22 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  '10Lf_sup_ref3' #experiment title that goes in tensorflow folder name
-mode= 1
-flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
+exptitle =  '10Lf_realbc30_ep55' #experiment title that goes in tensorflow folder name
+mode= 0
+flg_graph = True # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
 
 OoTWeight = 0.01 # out of target weight in generator
 DtTWeight = 0.001 # distance to target weight
 n_latent_sample = 5000 # latent code visualization sample
-n_epochs_ge = 45*n_leaves # mode 3, generator training epochs
+n_epochs_ge = 55*n_leaves # mode 3, generator training epochs
 ac_batch_size = 160  # autoencoder training batch size
 tb_batch_size = 800  # x_inputs batch size for tb
 tb_log_step = 200 # tb logging step
 import numpy as np
 blanket_resolution = 10*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
-dc_real_batch_size = int(blanket_resolution*blanket_resolution/40) # descriminator training real dist samplling batch size
+dc_real_batch_size = int(blanket_resolution*blanket_resolution/30) # descriminator training real dist samplling batch size
 dc_contour_res_x = 5 # x to the blanket resolution for descriminator contour plot
 myColor = ['black','orange', 'red', 'blue','gray','green','pink','cyan','Purple','lime','magenta']
 input_dim = 784
@@ -389,14 +389,15 @@ def tb_init(sess): # create tb path, model path and return tb writer and saved m
 def tb_write(sess):
     batch_x, batch_y = mnist.train.next_batch(tb_batch_size)
     batch_y_fl = np.expand_dims([np.where(r==1)[0][0] for r in batch_y],1).astype(float)
-                
+    
+    # increase batch size for tb to show stable stats and extend freq?            
     dc_real_lbl = np.expand_dims(np.random.randint(-1,10, size=dc_real_batch_size),1)
     dc_real_dist = gaussian_mixture(dc_real_batch_size, n_leaves,dc_real_lbl)
                 
     dc_blanket_digit = np.expand_dims(np.random.randint(-1,10, size=blanket_resolution*blanket_resolution),1)
                 
     sm = sess.run(summary_op,feed_dict={x_input: batch_x, real_distribution:dc_real_dist,\
-                         unif_z:blanket,real_lbl:dc_real_lbl ,unif_d:dc_blanket_digit, fake_lbl:batch_y_fl})
+             real_lbl:dc_real_lbl ,unif_z:blanket, unif_d:dc_blanket_digit, fake_lbl:batch_y_fl})
     writer.add_summary(sm, global_step=step)
 
 with tf.Session() as sess:
@@ -414,14 +415,15 @@ with tf.Session() as sess:
                 dc_real_lbl = np.expand_dims(np.random.randint(-1,10, size=dc_real_batch_size),1)
                 dc_real_dist = gaussian_mixture(dc_real_batch_size, n_leaves,dc_real_lbl)
                 
+                # need to be sampled for each batch?
                 dc_blanket_digit = np.expand_dims(np.random.randint(-1,10, size=blanket_resolution*blanket_resolution),1)
                 
                 sess.run([discriminator_optimizer],feed_dict={x_input: batch_x, real_distribution:dc_real_dist,\
-                         unif_z:blanket, real_lbl:dc_real_lbl ,unif_d:dc_blanket_digit, fake_lbl:batch_y_fl})
+                         real_lbl:dc_real_lbl ,unif_z:blanket, unif_d:dc_blanket_digit, fake_lbl:batch_y_fl})
                 #Generator
                 sess.run([generator_optimizer],feed_dict={x_input: batch_x,fake_lbl:batch_y_fl})
                 if b % tb_log_step == 0:
-                    show_discriminator(sess,1)
+                    show_discriminator(sess,1) #shows others like 3, 7 -1 ?
                     show_latent_code(sess,n_latent_sample)
                     tb_write(sess)
                 step += 1
@@ -430,10 +432,12 @@ with tf.Session() as sess:
     if mode==0: # showing the latest model result. InOut, true dist, discriminator, latent dist.
         model_restore(saver,mode,model_folder)
         show_inout(sess, op=decoder_output) 
-        real_lbl_ins = np.random.randint(-1,10, size=5000)
-        z_real_dist = gaussian_mixture(5000, n_leaves,real_lbl_ins)
-        show_real_dist(z_real_dist,real_lbl_ins)
+        dc_real_lbl = np.random.randint(-1,10, size=5000)
+        dc_real_dist = gaussian_mixture(5000, n_leaves,dc_real_lbl)
+        show_real_dist(dc_real_dist,dc_real_lbl)
         show_discriminator(sess,-1)    
+        show_discriminator(sess,5)
+        show_discriminator(sess,8)
         show_latent_code(sess,n_latent_sample)
     
         
