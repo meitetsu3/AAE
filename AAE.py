@@ -13,22 +13,22 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  '10Lf_realbc30_ep55' #experiment title that goes in tensorflow folder name
+exptitle =  '10Lf' #experiment title that goes in tensorflow folder name
 mode= 0
 flg_graph = True # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
+n_epochs_ge = 55*n_leaves # mode 3, generator training epochs
+ac_batch_size = 160  # autoencoder training batch size
+import numpy as np
+blanket_resolution = 10*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
+dc_real_batch_size = int(blanket_resolution*blanket_resolution/15) # descriminator training real dist samplling batch size
 
 OoTWeight = 0.01 # out of target weight in generator
 DtTWeight = 0.001 # distance to target weight
 n_latent_sample = 5000 # latent code visualization sample
-n_epochs_ge = 55*n_leaves # mode 3, generator training epochs
-ac_batch_size = 160  # autoencoder training batch size
 tb_batch_size = 800  # x_inputs batch size for tb
 tb_log_step = 200 # tb logging step
-import numpy as np
-blanket_resolution = 10*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
-dc_real_batch_size = int(blanket_resolution*blanket_resolution/30) # descriminator training real dist samplling batch size
 dc_contour_res_x = 5 # x to the blanket resolution for descriminator contour plot
 myColor = ['black','orange', 'red', 'blue','gray','green','pink','cyan','Purple','lime','magenta']
 input_dim = 784
