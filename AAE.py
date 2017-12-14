@@ -13,23 +13,23 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  '10Lf_holdout80' #experiment title that goes in tensorflow folder name
-mode= 0
-flg_graph = True # showing graphs or not during the training. Showing graphs significantly slows down the training.
-model_folder = '' # name of the model to be restored. white space means most recent.
+exptitle =  '10Lf_holdout40_fixedholdout' #experiment title that goes in tensorflow folder name
+mode= 1
+flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
+model_folder = '20171213232527_1_10Lf_fixedholdout80' # name of the model to be restored. white space means most recent.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
 n_epochs_ge = 70*n_leaves # mode 3, generator training epochs
 ac_batch_size = 300  # autoencoder training batch size
 import numpy as np
 blanket_resolution = 10*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
 dc_real_batch_size = int(blanket_resolution*blanket_resolution/15) # descriminator training real dist samplling batch size
-holdout_rate = 0.8 # rate of hold out label
+holdout_rate = 0.4 # rate of hold out label
 
 OoTWeight = 0.01 # out of target weight in generator
 DtTWeight = 0.001 # distance to target weight
 n_latent_sample = 5000 # latent code visualization sample
 tb_batch_size = 800  # x_inputs batch size for tb
-tb_log_step = 200 # tb logging step
+tb_log_step = 200  # forcing holdout_rate of samples to have -1 # tb logging step
 dc_contour_res_x = 5 # x to the blanket resolution for descriminator contour plot
 myColor = ['black','orange', 'red', 'blue','gray','green','pink','cyan','Purple','lime','magenta']
 input_dim = 784
@@ -55,7 +55,12 @@ from tqdm import tqdm
 tf.reset_default_graph()
 
 # Get the MNIST data
-mnist = input_data.read_data_sets('./Data', one_hot=True)
+mnist = input_data.read_data_sets('./Data', one_hot=False)
+labels_fixedcopy = mnist.train.labels
+mnist.train._labels.setflags(write=1)
+labels = np.expand_dims(mnist.train._labels,axis=1).astype(np.int8)
+labels[random.sample(range(mnist.train.num_examples),int(mnist.train.num_examples*holdout_rate))]=-1
+mnist.train._labels = labels
 
 # Placeholders for input data and the targets
 x_input = tf.placeholder(dtype=tf.float32, shape=[None, input_dim], name='Input')
@@ -153,7 +158,7 @@ def show_latent_code(sess,spc):
     
     with tf.variable_scope("Encoder"):
         test_zs = sess.run(encoder(mnist[0].images, reuse=True))
-    ytrain = np.argmax(mnist[0].labels,axis=1)
+    ytrain = labels_fixedcopy
     
     cm = matplotlib.colors.ListedColormap(myColor[1:])
     
@@ -203,7 +208,9 @@ def show_discriminator(sess,digit):
     plt.close()
     
 def show_real_dist(z_real_dist, real_lbl_ins):
-    """
+    """mnist = input_data.read_data_sets('./Data', one_hot=False)
+mnist.train._labels.setflags(write=1)
+labels = np.expand_dims(mnist.train._labels,axis=1).astype(int8)
     Shows real distribution
     Parameters. z_real_dist:(batch_size,2) numpy array
     No return. Displays image.
@@ -389,7 +396,7 @@ def tb_init(sess): # create tb path, model path and return tb writer and saved m
 
 def tb_write(sess):
     batch_x, batch_y = mnist.train.next_batch(tb_batch_size)
-    batch_y_fl = np.expand_dims([np.where(r==1)[0][0] for r in batch_y],1).astype(float)
+    batch_y_fl = batch_y.astype(float)
     
     # increase batch size for tb to show stable stats and extend freq?            
     dc_real_lbl = np.expand_dims(np.random.randint(-1,10, size=dc_real_batch_size),1)
@@ -412,9 +419,8 @@ with tf.Session() as sess:
                 #Discriminator
                 batch_x, batch_y = mnist.train.next_batch(ac_batch_size)
                 # convert one-hot encoding to integer
-                batch_y_fl = np.expand_dims([np.where(r==1)[0][0] for r in batch_y],1).astype(float)
-                # forcing holdout_rate of samples to have -1
-                batch_y_fl[random.sample(range(len(batch_y_fl)),int(len(batch_y_fl)*holdout_rate))]=-1
+                batch_y_fl = batch_y.astype(float)
+        
                 # real batch uniform sampling for each lable and unknown label. This is not constrained by lable availability.
                 dc_real_lbl = np.expand_dims(np.random.randint(-1,10, size=dc_real_batch_size),1)
                 dc_real_dist = gaussian_mixture(dc_real_batch_size, n_leaves,dc_real_lbl)
