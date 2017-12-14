@@ -13,16 +13,17 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  '10Lf' #experiment title that goes in tensorflow folder name
+exptitle =  '10Lf_holdout80' #experiment title that goes in tensorflow folder name
 mode= 0
 flg_graph = True # showing graphs or not during the training. Showing graphs significantly slows down the training.
-model_folder = '20171212234617_1_10Lf_acbs300' # name of the model to be restored. white space means most recent.
+model_folder = '' # name of the model to be restored. white space means most recent.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
-n_epochs_ge = 55*n_leaves # mode 3, generator training epochs
+n_epochs_ge = 70*n_leaves # mode 3, generator training epochs
 ac_batch_size = 300  # autoencoder training batch size
 import numpy as np
 blanket_resolution = 10*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
 dc_real_batch_size = int(blanket_resolution*blanket_resolution/15) # descriminator training real dist samplling batch size
+holdout_rate = 0.8 # rate of hold out label
 
 OoTWeight = 0.01 # out of target weight in generator
 DtTWeight = 0.001 # distance to target weight
@@ -409,9 +410,12 @@ with tf.Session() as sess:
             print("------------------Epoch {}/{} ------------------".format(i, n_epochs_ge))
             for b in tqdm(range(n_batches)):    
                 #Discriminator
-                batch_x, batch_y = mnist.train.next_batch(ac_batch_size)    
+                batch_x, batch_y = mnist.train.next_batch(ac_batch_size)
+                # convert one-hot encoding to integer
                 batch_y_fl = np.expand_dims([np.where(r==1)[0][0] for r in batch_y],1).astype(float)
-    
+                # forcing holdout_rate of samples to have -1
+                batch_y_fl[random.sample(range(len(batch_y_fl)),int(len(batch_y_fl)*holdout_rate))]=-1
+                # real batch uniform sampling for each lable and unknown label. This is not constrained by lable availability.
                 dc_real_lbl = np.expand_dims(np.random.randint(-1,10, size=dc_real_batch_size),1)
                 dc_real_dist = gaussian_mixture(dc_real_batch_size, n_leaves,dc_real_lbl)
                 
