@@ -13,9 +13,9 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  '10Lf_realbc10' #experiment title that goes in tensorflow folder name
-mode=0
-flg_graph = True # showing graphs or not during the training. Showing graphs significantly slows down the training.
+exptitle =  '10Lf_11d' #experiment title that goes in tensorflow folder name
+mode=1
+flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
 n_epochs_ge = 90*n_leaves # mode 3, generator training epochs
@@ -67,7 +67,6 @@ x_input = tf.placeholder(dtype=tf.float32, shape=[None, input_dim], name='Input'
 real_distribution = tf.placeholder(dtype=tf.float32, shape=[None, z_dim], name='Real_distribution')
 real_lbl = tf.placeholder(dtype=tf.float32, shape=[None,11],name = 'Real_lable')
 fake_lbl = tf.placeholder(dtype=tf.float32, shape=[None,11],name = 'Fake_lable')
-unif_d = tf.placeholder(dtype=tf.float32, shape=[None,11],name = 'Uniform_digits')
 unif_z = tf.placeholder(dtype=tf.float32, shape=[blanket_resolution*blanket_resolution, z_dim], name='Uniform_z')
 
 he_init = tf.contrib.layers.variance_scaling_initializer(mode="FAN_AVG")
@@ -194,8 +193,8 @@ def show_discriminator(sess,digit):
     
     X, Y = np.meshgrid(xlist, ylist)    
     
-    with tf.variable_scope("Discriminator"):
-        desc_result = sess.run(tf.nn.sigmoid(discriminator(blanket,digit_v, reuse=True)))
+    with tf.variable_scope("DiscriminatorZ"):
+        desc_result = sess.run(tf.nn.sigmoid(discriminatorZ(blanket,digit_v, reuse=True)))
 
     Z = np.empty((br,br), dtype="float32")    
     for i in range(br):
@@ -287,17 +286,23 @@ def decoder(z,y, reuse=False):
     output = fully_connected(last_layer, input_dim, weights_initializer=he_init, scope='Sigmoid', activation_fn=tf.sigmoid)
     return output
 
-def discriminator(x, dg, reuse=False):
+def discriminatorZ(x,reuse=False):
     """
     Discriminator that leanes to activate at true distribution and not for the others.
-    :param x: tensor of shape [batch_size, z_dim]
-    :param dg: one-hot-vector as a selector of a leaf.
-    :param reuse: True -> Reuse the discriminator variables, False -> Create the variables
-    :return: tensor of shape [batch_size, 1]. I think it's better to take sigmoid here.
     """
     if reuse:
         tf.get_variable_scope().reuse_variables()
-    last_layer = mlp_dec(tf.concat([x,dg],1))
+    last_layer = mlp_dec(x)
+    output = fully_connected(last_layer, 1, weights_initializer=he_init, scope='None',activation_fn=None)
+    return output
+
+def discriminatorY(x,lbl,reuse=False):
+    """
+    Discriminator that leanes to activate at true distribution and not for the others.
+    """
+    if reuse:
+        tf.get_variable_scope().reuse_variables()
+    last_layer = mlp_dec(tf.concat([x,lbl],1))
     output = fully_connected(last_layer, 1, weights_initializer=he_init, scope='None',activation_fn=None)
     return output
 
@@ -328,6 +333,16 @@ def gaussian_mixture(batchsize, num_leaves, sel):
             z[batch, zi*2:zi*2+2] = sample(x[batch, zi], y[batch, zi], s, num_leaves)
     return z
 
+def standardNormal2D(batchsize):
+    """
+    standard normal 2d dist
+    """
+    x_var = 0.5
+    y_var = 0.5
+    x = np.random.normal(0, x_var, (batchsize, 1))
+    y = np.random.normal(0, y_var, (batchsize, 1))
+    z = np.append(x,y,1)
+    return z
  
 """
 Defining key operations, Loess, Optimizer and other necessary operations
@@ -338,30 +353,37 @@ with tf.variable_scope('Encoder'):
 with tf.variable_scope('Decoder'):
     decoder_output = decoder(encoder_outputZ,encoder_outputY)
 
-with tf.variable_scope('Discriminator'):
-    d_real = discriminator(real_distribution,real_lbl)
-    d_blanket = discriminator(unif_z, unif_d, reuse=True)
-    d_fake = discriminator(encoder_outputZ,fake_lbl, reuse=True)
+with tf.variable_scope('DiscriminatorZ'):
+    dz_real = discriminatorZ(real_distribution)
+    dz_blanket = discriminatorZ(unif_z, reuse=True)
+    dz_fake = discriminatorZ(encoder_outputZ, reuse=True)
+    
+with tf.variable_scope('DiscriminatorY'):
+    dy_real = discriminatorY(real_lbl, real_lbl)
+    dy_fake = discriminatorY(encoder_outputY, fake_lbl, reuse=True)   
     
 # loss
 with tf.name_scope("ae_loss"):
     autoencoder_loss = tf.reduce_mean(tf.square(x_input - decoder_output))
     
 with tf.name_scope("dc_loss"):
-    dc_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(d_real), logits=d_real))
-    dc_loss_blanket = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(d_blanket), logits=d_blanket))
-    dc_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(d_fake), logits=d_fake))
-    dc_loss = dc_loss_blanket + dc_loss_real+dc_loss_fake
+    dc_zloss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(dz_real), logits=dz_real))
+    dc_zloss_blanket = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(dz_blanket), logits=dz_blanket))
+    dc_zloss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(dz_fake), logits=dz_fake))
+    dc_yloss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(dy_real), logits=dy_real))
+    dc_yloss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(dy_fake), logits=dy_fake))
+    dc_loss = dc_zloss_blanket + dc_zloss_real+dc_zloss_fake+dc_yloss_real+dc_yloss_fake
 
 with tf.name_scope("ge_loss"):
     #Out of Target penalty
-    OoT_penalty =OoTWeight*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(d_fake), logits=d_fake))
-    generator_loss = autoencoder_loss+OoT_penalty #not sure why it averages out
+    OoT_penaltyZ =OoTWeight*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(dz_fake), logits=dz_fake))
+    OoT_penaltyY =OoTWeight*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(dy_fake), logits=dy_fake))
+    generator_loss = autoencoder_loss+OoT_penaltyZ+OoT_penaltyY #not sure why it averages out
 
 #optimizer
 all_variables = tf.trainable_variables()
-dc_var = [var for var in all_variables if 'Discriminator/' in var.name]
-ae_var = [var for var in all_variables if ('Encoder/' in var.name or 'Decoder/' in var.name)]
+dc_var = [var for var in all_variables if 'Discriminator' in var.name]
+ae_var = [var for var in all_variables if ('Encoder/' in var.name or 'Decoderdc_yloss_fake/' in var.name)]
 
 with tf.name_scope("AE_optimizer"):
     autoencoder_optimizer = tf.train.AdamOptimizer().minimize(autoencoder_loss)
@@ -382,7 +404,8 @@ generated_images = tf.reshape(decoder_output, [-1, 28, 28, 1])
 ae_sm = tf.summary.scalar(name='Autoencoder_Loss', tensor=autoencoder_loss)
 dc_sm = tf.summary.scalar(name='Discriminator_Loss', tensor=dc_loss)
 ge_sm = tf.summary.scalar(name='Generator_Loss', tensor=generator_loss)
-oot_sm = tf.summary.scalar(name='OoT_penalty', tensor=OoT_penalty)
+ootz_sm = tf.summary.scalar(name='OoT_penaltyZ', tensor=OoT_penaltyZ)
+ooty_sm = tf.summary.scalar(name='OoT_penaltyY', tensor=OoT_penaltyY)
 summary_op = tf.summary.merge_all()
 
 # Creating saver and get ready
@@ -404,13 +427,11 @@ def tb_write(sess):
     #batch_y_fl = batch_y.astype(float)
     
     # increase batch size for tb to show stable stats and extend freq?            
-    dc_real_lbl = np.eye(11)[np.array(np.random.randint(-1,10, size=dc_real_batch_size)).reshape(-1)]
-    dc_real_dist = gaussian_mixture(dc_real_batch_size, n_leaves,dc_real_lbl)
-                
-    dc_blanket_digit = np.eye(11)[np.array(np.random.randint(-1,10, size=blanket_resolution*blanket_resolution)).reshape(-1)]
-                
+    dc_real_lbl = np.eye(11)[np.array(np.random.randint(0,11, size=dc_real_batch_size)).reshape(-1)]
+    dc_real_dist = standardNormal2D(dc_real_batch_size)
+
     sm = sess.run(summary_op,feed_dict={x_input: batch_x, real_distribution:dc_real_dist,\
-             real_lbl:dc_real_lbl ,unif_z:blanket, unif_d:dc_blanket_digit, fake_lbl:batch_y})
+             real_lbl:dc_real_lbl ,unif_z:blanket, fake_lbl:batch_y})
     writer.add_summary(sm, global_step=step)
 
 with tf.Session() as sess:
@@ -423,16 +444,13 @@ with tf.Session() as sess:
             for b in tqdm(range(n_batches)):    
                 #Discriminator
                 batch_x, batch_y = mnist.train.next_batch(ac_batch_size)
-        
+                
                 # real batch uniform sampling for each lable and unknown label. This is not constrained by lable availability.
                 dc_real_lbl = np.eye(11)[np.array(np.random.randint(0,11, size=dc_real_batch_size)).reshape(-1)]
-                dc_real_dist = gaussian_mixture(dc_real_batch_size, n_leaves,dc_real_lbl)
-                
-                # need to be sampled for each batch?
-                dc_blanket_digit = np.eye(11)[np.array(np.random.randint(0,11, size=blanket_resolution*blanket_resolution)).reshape(-1)]
+                dc_real_dist = standardNormal2D(dc_real_batch_size)# or maybe we can make this only smaller
                 
                 sess.run([discriminator_optimizer],feed_dict={x_input: batch_x, real_distribution:dc_real_dist,\
-                         real_lbl:dc_real_lbl ,unif_z:blanket, unif_d:dc_blanket_digit, fake_lbl:batch_y})
+                         real_lbl:dc_real_lbl ,unif_z:blanket, fake_lbl:batch_y})
                 #Generator
                 sess.run([generator_optimizer],feed_dict={x_input: batch_x,fake_lbl:batch_y})
                 if b % tb_log_step == 0:
