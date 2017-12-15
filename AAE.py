@@ -13,20 +13,19 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  '10Lf_LatentY_onehot' #experiment title that goes in tensorflow folder name
-mode= 1
-flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
+exptitle =  '10Lf_realbc10' #experiment title that goes in tensorflow folder name
+mode=0
+flg_graph = True # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
-n_epochs_ge = 9*n_leaves # mode 3, generator training epochs
+n_epochs_ge = 90*n_leaves # mode 3, generator training epochs
 ac_batch_size = 500  # autoencoder training batch size
 import numpy as np
 blanket_resolution = 10*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
 dc_real_batch_size = int(blanket_resolution*blanket_resolution/15) # descriminator training real dist samplling batch size
 holdout_rate = 0.8 # rate of hold out label
 
-OoTWeight = 0.025 # out of target weight in generator
-DtTWeight = 0.001 # distance to target weight
+OoTWeight = 0.005 # out of target weight in generator
 n_latent_sample = 5000 # latent code visualization sample
 tb_batch_size = 800  # x_inputs batch size for tb
 tb_log_step = 200  # tb logging step
@@ -329,16 +328,7 @@ def gaussian_mixture(batchsize, num_leaves, sel):
             z[batch, zi*2:zi*2+2] = sample(x[batch, zi], y[batch, zi], s, num_leaves)
     return z
 
-def cat_sampler(batchsize, num_leaves, sel):
-    """
-    returns one-hot encoder.
-    columns are num_leaves, plus 1 more column for unknown category
-    """
-    z = np.empty((batchsize, 2), dtype=np.float32)
-    for batch in range(batchsize):
-        s = np.random.randint(0, num_leaves) if sel[batch] == -1 else sel[batch]
-        z[batch,0] = s
-    return z        
+ 
 """
 Defining key operations, Loess, Optimizer and other necessary operations
 """
@@ -435,11 +425,11 @@ with tf.Session() as sess:
                 batch_x, batch_y = mnist.train.next_batch(ac_batch_size)
         
                 # real batch uniform sampling for each lable and unknown label. This is not constrained by lable availability.
-                dc_real_lbl = np.eye(11)[np.array(np.random.randint(-1,10, size=dc_real_batch_size)).reshape(-1)]
+                dc_real_lbl = np.eye(11)[np.array(np.random.randint(0,11, size=dc_real_batch_size)).reshape(-1)]
                 dc_real_dist = gaussian_mixture(dc_real_batch_size, n_leaves,dc_real_lbl)
                 
                 # need to be sampled for each batch?
-                dc_blanket_digit = np.eye(11)[np.array(np.random.randint(-1,10, size=blanket_resolution*blanket_resolution)).reshape(-1)]
+                dc_blanket_digit = np.eye(11)[np.array(np.random.randint(0,11, size=blanket_resolution*blanket_resolution)).reshape(-1)]
                 
                 sess.run([discriminator_optimizer],feed_dict={x_input: batch_x, real_distribution:dc_real_dist,\
                          real_lbl:dc_real_lbl ,unif_z:blanket, unif_d:dc_blanket_digit, fake_lbl:batch_y})
