@@ -3,7 +3,7 @@
 Created on Thu Nov 16 11:50:32 2017
 ref: https://github.com/Naresh1318/Adversarial_Autoencoder
 @author: mtodaka
-
+: cat descriminator
 : learning rate schedule
 :feed mode to run ./file
 """
@@ -13,19 +13,19 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  '10Lf_OoT02' #experiment title that goes in tensorflow folder name
-mode= 0
-flg_graph = True # showing graphs or not during the training. Showing graphs significantly slows down the training.
+exptitle =  '10Lf_LatentY_onehot' #experiment title that goes in tensorflow folder name
+mode= 1
+flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
-n_epochs_ge = 70*n_leaves # mode 3, generator training epochs
+n_epochs_ge = 9*n_leaves # mode 3, generator training epochs
 ac_batch_size = 500  # autoencoder training batch size
 import numpy as np
 blanket_resolution = 10*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
 dc_real_batch_size = int(blanket_resolution*blanket_resolution/15) # descriminator training real dist samplling batch size
-holdout_rate = 0.6 # rate of hold out label
+holdout_rate = 0.8 # rate of hold out label
 
-OoTWeight = 0.02 # out of target weight in generator
+OoTWeight = 0.025 # out of target weight in generator
 DtTWeight = 0.001 # distance to target weight
 n_latent_sample = 5000 # latent code visualization sample
 tb_batch_size = 800  # x_inputs batch size for tb
@@ -55,19 +55,20 @@ from tqdm import tqdm
 tf.reset_default_graph()
 
 # Get the MNIST data
-mnist = input_data.read_data_sets('./Data', one_hot=False)
+mnist = input_data.read_data_sets('./Data', one_hot=True)
 labels_fixedcopy = mnist.train.labels # keeping original label
 mnist.train._labels.setflags(write=1)# forcing holdout_rate of samples to have -1 
-labels = np.expand_dims(mnist.train._labels,axis=1).astype(np.int8)
-labels[random.sample(range(mnist.train.num_examples),int(mnist.train.num_examples*holdout_rate))]=-1
-mnist.train._labels = labels
+unknownv = np.zeros((mnist.train.num_examples,1))
+mnist.train._labels = np.append(mnist.train.labels,unknownv,1)
+unknownv[random.sample(range(mnist.train.num_examples),int(mnist.train.num_examples*holdout_rate))]=1
+mnist.train._labels[np.squeeze(unknownv==1,1)] = np.array([0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,1.0])
 
 # Placeholders for input data and the targets
 x_input = tf.placeholder(dtype=tf.float32, shape=[None, input_dim], name='Input')
 real_distribution = tf.placeholder(dtype=tf.float32, shape=[None, z_dim], name='Real_distribution')
-real_lbl = tf.placeholder(dtype=tf.float32, shape=[None,1],name = 'Real_lable')
-fake_lbl = tf.placeholder(dtype=tf.float32, shape=[None,1],name = 'Fake_lable')
-unif_d = tf.placeholder(dtype=tf.float32, shape=[None,1],name = 'Uniform_digits')
+real_lbl = tf.placeholder(dtype=tf.float32, shape=[None,11],name = 'Real_lable')
+fake_lbl = tf.placeholder(dtype=tf.float32, shape=[None,11],name = 'Fake_lable')
+unif_d = tf.placeholder(dtype=tf.float32, shape=[None,11],name = 'Uniform_digits')
 unif_z = tf.placeholder(dtype=tf.float32, shape=[blanket_resolution*blanket_resolution, z_dim], name='Uniform_z')
 
 he_init = tf.contrib.layers.variance_scaling_initializer(mode="FAN_AVG")
@@ -157,7 +158,7 @@ def show_latent_code(sess,spc):
     plt.tight_layout()
     
     with tf.variable_scope("Encoder"):
-        test_zs = sess.run(encoder(mnist[0].images, reuse=True))
+        train_zs,train_ys = sess.run(encoder(mnist[0].images, reuse=True))
     ytrain = labels_fixedcopy
     
     cm = matplotlib.colors.ListedColormap(myColor[1:])
@@ -165,8 +166,8 @@ def show_latent_code(sess,spc):
     fig, ax = plt.subplots(1)
     
     for i in range(10):
-        y=test_zs[np.where(ytrain==i),1][0,0:spc]
-        x=test_zs[np.where(ytrain==i),0][0,0:spc]
+        y=train_zs[np.where(ytrain[:,i]==1),1][0,0:spc]
+        x=train_zs[np.where(ytrain[:,i]==1),0][0,0:spc]
         color = cm(i)
         ax.scatter(x, y, label=str(i), alpha=0.9, facecolor=color, linewidth=0.02, s = 10)
     
@@ -185,7 +186,10 @@ def show_discriminator(sess,digit):
         return
     br = dc_contour_res_x*blanket_resolution
     xlist, ylist, blanket = get_blanket(br)
-    digit_v = np.repeat(np.float32(digit),len(blanket)).reshape(len(blanket),1)
+    
+    digit_v = np.zeros((len(blanket),11),dtype=np.float32)
+    digit_v[:,digit] = 1.0
+
     plt.rc('figure', figsize=(6, 5))
     plt.tight_layout()
     
@@ -221,8 +225,8 @@ def show_real_dist(z_real_dist, real_lbl_ins):
     cm = matplotlib.colors.ListedColormap(myColor)
 
     for i in range(-1,10):
-        y=z_real_dist[np.where(real_lbl_ins==i),1]
-        x=z_real_dist[np.where(real_lbl_ins==i),0]
+        y=z_real_dist[np.where(real_lbl_ins[:,i]==1),1]
+        x=z_real_dist[np.where(real_lbl_ins[:,i]==1),0]
         color = cm(i+1)
         ax.scatter(x,y,label=str(i), alpha=0.9, facecolor=color, linewidth=0.15,s = 5)
 
@@ -264,10 +268,12 @@ def encoder(x, reuse=False):
     if reuse:
         tf.get_variable_scope().reuse_variables()
     last_layer = mlp_enc(x)
-    output = fully_connected(last_layer, z_dim,weights_initializer=he_init, scope='None',activation_fn=None)
-    return output
+    outputZ = fully_connected(last_layer, z_dim,weights_initializer=he_init, scope='linZ',activation_fn=None)
+    outputY = fully_connected(last_layer, n_leaves+1, weights_initializer=he_init, scope='softmaxY',activation_fn=tf.nn.softmax)
+    
+    return outputZ,outputY
 
-def decoder(x, reuse=False):
+def decoder(z,y, reuse=False):
     """
     Decoder part of the autoencoder.
     :param x: input to the decoder
@@ -275,6 +281,7 @@ def decoder(x, reuse=False):
     :return: tensor which should ideally be the input given to the encoder.
     tf.sigmoid
     """
+    x = tf.concat([z,y],axis=1)
     if reuse:
         tf.get_variable_scope().reuse_variables()
     last_layer = mlp_dec(x)
@@ -299,7 +306,7 @@ def gaussian_mixture(batchsize, num_leaves, sel):
     """
     Crate true distribution with num_leaves 2D Gaussian
     :batch_size: number of data points to generate
-    :sel: selector. 0 means all leaves.
+    :sel: selector. one-hot encoding with last column means unkown category
     :return: tensor of shape [batch_size, 2]. I think it's better to take sigmoid here.
     """
     def sample(x, y, label, num_leaves):
@@ -318,23 +325,33 @@ def gaussian_mixture(batchsize, num_leaves, sel):
     z = np.empty((batchsize, 2), dtype=np.float32)
     for batch in range(batchsize):
         for zi in range(2 // 2):
-            s = np.random.randint(0, num_leaves) if sel[batch] == -1 else sel[batch]
+            s = np.random.randint(0, num_leaves) if sel[batch][10] == 1 else np.where(sel[batch]==1)[0][0]
             z[batch, zi*2:zi*2+2] = sample(x[batch, zi], y[batch, zi], s, num_leaves)
     return z
-            
+
+def cat_sampler(batchsize, num_leaves, sel):
+    """
+    returns one-hot encoder.
+    columns are num_leaves, plus 1 more column for unknown category
+    """
+    z = np.empty((batchsize, 2), dtype=np.float32)
+    for batch in range(batchsize):
+        s = np.random.randint(0, num_leaves) if sel[batch] == -1 else sel[batch]
+        z[batch,0] = s
+    return z        
 """
 Defining key operations, Loess, Optimizer and other necessary operations
 """
 with tf.variable_scope('Encoder'):
-    encoder_output = encoder(x_input)
+    encoder_outputZ,encoder_outputY = encoder(x_input)
 
 with tf.variable_scope('Decoder'):
-    decoder_output = decoder(encoder_output)
+    decoder_output = decoder(encoder_outputZ,encoder_outputY)
 
 with tf.variable_scope('Discriminator'):
     d_real = discriminator(real_distribution,real_lbl)
     d_blanket = discriminator(unif_z, unif_d, reuse=True)
-    d_fake = discriminator(encoder_output,fake_lbl, reuse=True)
+    d_fake = discriminator(encoder_outputZ,fake_lbl, reuse=True)
     
 # loss
 with tf.name_scope("ae_loss"):
@@ -394,16 +411,16 @@ def tb_init(sess): # create tb path, model path and return tb writer and saved m
 
 def tb_write(sess):
     batch_x, batch_y = mnist.train.next_batch(tb_batch_size)
-    batch_y_fl = batch_y.astype(float)
+    #batch_y_fl = batch_y.astype(float)
     
     # increase batch size for tb to show stable stats and extend freq?            
-    dc_real_lbl = np.expand_dims(np.random.randint(-1,10, size=dc_real_batch_size),1)
+    dc_real_lbl = np.eye(11)[np.array(np.random.randint(-1,10, size=dc_real_batch_size)).reshape(-1)]
     dc_real_dist = gaussian_mixture(dc_real_batch_size, n_leaves,dc_real_lbl)
                 
-    dc_blanket_digit = np.expand_dims(np.random.randint(-1,10, size=blanket_resolution*blanket_resolution),1)
+    dc_blanket_digit = np.eye(11)[np.array(np.random.randint(-1,10, size=blanket_resolution*blanket_resolution)).reshape(-1)]
                 
     sm = sess.run(summary_op,feed_dict={x_input: batch_x, real_distribution:dc_real_dist,\
-             real_lbl:dc_real_lbl ,unif_z:blanket, unif_d:dc_blanket_digit, fake_lbl:batch_y_fl})
+             real_lbl:dc_real_lbl ,unif_z:blanket, unif_d:dc_blanket_digit, fake_lbl:batch_y})
     writer.add_summary(sm, global_step=step)
 
 with tf.Session() as sess:
@@ -416,20 +433,18 @@ with tf.Session() as sess:
             for b in tqdm(range(n_batches)):    
                 #Discriminator
                 batch_x, batch_y = mnist.train.next_batch(ac_batch_size)
-                # convert one-hot encoding to integer
-                batch_y_fl = batch_y.astype(float)
         
                 # real batch uniform sampling for each lable and unknown label. This is not constrained by lable availability.
-                dc_real_lbl = np.expand_dims(np.random.randint(-1,10, size=dc_real_batch_size),1)
+                dc_real_lbl = np.eye(11)[np.array(np.random.randint(-1,10, size=dc_real_batch_size)).reshape(-1)]
                 dc_real_dist = gaussian_mixture(dc_real_batch_size, n_leaves,dc_real_lbl)
                 
                 # need to be sampled for each batch?
-                dc_blanket_digit = np.expand_dims(np.random.randint(-1,10, size=blanket_resolution*blanket_resolution),1)
+                dc_blanket_digit = np.eye(11)[np.array(np.random.randint(-1,10, size=blanket_resolution*blanket_resolution)).reshape(-1)]
                 
                 sess.run([discriminator_optimizer],feed_dict={x_input: batch_x, real_distribution:dc_real_dist,\
-                         real_lbl:dc_real_lbl ,unif_z:blanket, unif_d:dc_blanket_digit, fake_lbl:batch_y_fl})
+                         real_lbl:dc_real_lbl ,unif_z:blanket, unif_d:dc_blanket_digit, fake_lbl:batch_y})
                 #Generator
-                sess.run([generator_optimizer],feed_dict={x_input: batch_x,fake_lbl:batch_y_fl})
+                sess.run([generator_optimizer],feed_dict={x_input: batch_x,fake_lbl:batch_y})
                 if b % tb_log_step == 0:
                     show_discriminator(sess,1) #shows others like 3, 7 -1 ?
                     show_latent_code(sess,n_latent_sample)
@@ -440,12 +455,13 @@ with tf.Session() as sess:
     if mode==0: # showing the latest model result. InOut, true dist, discriminator, latent dist.
         model_restore(saver,mode,model_folder)
         show_inout(sess, op=decoder_output) 
-        dc_real_lbl = np.random.randint(-1,10, size=5000)
+        dc_real_lbl = np.eye(11)[np.array(np.random.randint(-1,10, size=5000)).reshape(-1)]        
         dc_real_dist = gaussian_mixture(5000, n_leaves,dc_real_lbl)
         show_real_dist(dc_real_dist,dc_real_lbl)
         show_discriminator(sess,-1)    
         show_discriminator(sess,5)
         show_discriminator(sess,8)
         show_latent_code(sess,n_latent_sample)
+        
     
         
