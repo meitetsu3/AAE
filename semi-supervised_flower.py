@@ -14,8 +14,8 @@ modes:
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
 exptitle =  '10Lf' #experiment title that goes in tensorflow folder name
-mode=0
-flg_graph = True # showing graphs or not during the training. Showing graphs significantly slows down the training.
+mode=1 
+flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
 n_epochs_ge = 90*n_leaves # mode 3, generator training epochs
@@ -164,7 +164,7 @@ def show_latent_code(sess,spc):
     
     fig, ax = plt.subplots(1)
     
-    for i in range(10):
+    for i in range(n_leaves):
         y=train_zs[np.where(ytrain[:,i]==1),1][0,0:spc]
         x=train_zs[np.where(ytrain[:,i]==1),0][0,0:spc]
         color = cm(i)
@@ -223,7 +223,7 @@ def show_real_dist(z_real_dist, real_lbl_ins):
     fig, ax = plt.subplots(1)
     cm = matplotlib.colors.ListedColormap(myColor)
 
-    for i in range(-1,10):
+    for i in range(0,n_leaves):
         y=z_real_dist[np.where(real_lbl_ins[:,i]==1),1]
         x=z_real_dist[np.where(real_lbl_ins[:,i]==1),0]
         color = cm(i+1)
@@ -324,7 +324,7 @@ def gaussian_mixture(batchsize, num_leaves, sel):
     z = np.empty((batchsize, 2), dtype=np.float32)
     for batch in range(batchsize):
         for zi in range(2 // 2):
-            s = np.random.randint(0, num_leaves) if sel[batch][10] == 1 else np.where(sel[batch]==1)[0][0]
+            s = np.random.randint(0, num_leaves) if sel[batch][n_leaves] == 1 else np.where(sel[batch]==1)[0][0]
             z[batch, zi*2:zi*2+2] = sample(x[batch, zi], y[batch, zi], s, num_leaves)
     return z
 
@@ -336,8 +336,8 @@ with tf.variable_scope('Encoder'):
     encoder_outputZ,encoder_outputY = encoder(x_input)
 
 with tf.variable_scope('Decoder'):
-    decoder_output = decoder(encoder_outputZ,encoder_outputY)
-
+    decoder_output = decoder(encoder_outputZ,tf.one_hot(tf.argmax(encoder_outputY, dimension = 1), depth = n_leaves+1))
+    
 with tf.variable_scope('Discriminator'):
     d_real = discriminator(real_distribution,real_lbl)
     d_blanket = discriminator(unif_z, unif_d, reuse=True)
@@ -404,10 +404,10 @@ def tb_write(sess):
     #batch_y_fl = batch_y.astype(float)
     
     # increase batch size for tb to show stable stats and extend freq?            
-    dc_real_lbl = np.eye(11)[np.array(np.random.randint(-1,10, size=dc_real_batch_size)).reshape(-1)]
+    dc_real_lbl = np.eye(11)[np.array(np.random.randint(0,n_leaves+1, size=dc_real_batch_size)).reshape(-1)]
     dc_real_dist = gaussian_mixture(dc_real_batch_size, n_leaves,dc_real_lbl)
                 
-    dc_blanket_digit = np.eye(11)[np.array(np.random.randint(-1,10, size=blanket_resolution*blanket_resolution)).reshape(-1)]
+    dc_blanket_digit = np.eye(11)[np.array(np.random.randint(0,n_leaves+1, size=blanket_resolution*blanket_resolution)).reshape(-1)]
                 
     sm = sess.run(summary_op,feed_dict={x_input: batch_x, real_distribution:dc_real_dist,\
              real_lbl:dc_real_lbl ,unif_z:blanket, unif_d:dc_blanket_digit, fake_lbl:batch_y})
@@ -425,11 +425,11 @@ with tf.Session() as sess:
                 batch_x, batch_y = mnist.train.next_batch(ac_batch_size)
         
                 # real batch uniform sampling for each lable and unknown label. This is not constrained by lable availability.
-                dc_real_lbl = np.eye(11)[np.array(np.random.randint(0,11, size=dc_real_batch_size)).reshape(-1)]
+                dc_real_lbl = np.eye(11)[np.array(np.random.randint(0,n_leaves+1, size=dc_real_batch_size)).reshape(-1)]
                 dc_real_dist = gaussian_mixture(dc_real_batch_size, n_leaves,dc_real_lbl)
                 
                 # need to be sampled for each batch?
-                dc_blanket_digit = np.eye(11)[np.array(np.random.randint(0,11, size=blanket_resolution*blanket_resolution)).reshape(-1)]
+                dc_blanket_digit = np.eye(11)[np.array(np.random.randint(0,n_leaves+1, size=blanket_resolution*blanket_resolution)).reshape(-1)]
                 
                 sess.run([discriminator_optimizer],feed_dict={x_input: batch_x, real_distribution:dc_real_dist,\
                          real_lbl:dc_real_lbl ,unif_z:blanket, unif_d:dc_blanket_digit, fake_lbl:batch_y})
@@ -445,7 +445,7 @@ with tf.Session() as sess:
     if mode==0: # showing the latest model result. InOut, true dist, discriminator, latent dist.
         model_restore(saver,mode,model_folder)
         show_inout(sess, op=decoder_output) 
-        dc_real_lbl = np.eye(11)[np.array(np.random.randint(-1,10, size=5000)).reshape(-1)]        
+        dc_real_lbl = np.eye(11)[np.array(np.random.randint(0,n_leaves+1, size=5000)).reshape(-1)]        
         dc_real_dist = gaussian_mixture(5000, n_leaves,dc_real_lbl)
         show_real_dist(dc_real_dist,dc_real_lbl)
         show_discriminator(sess,-1)    
