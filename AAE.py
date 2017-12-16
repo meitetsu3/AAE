@@ -14,8 +14,8 @@ modes:
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
 exptitle =  '10Lf_11d' #experiment title that goes in tensorflow folder name
-mode=1
-flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
+mode= 0
+flg_graph = True # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
 n_epochs_ge = 90*n_leaves # mode 3, generator training epochs
@@ -25,7 +25,8 @@ blanket_resolution = 10*int(np.sqrt(n_leaves)) # blanket resoliution for descrim
 dc_real_batch_size = int(blanket_resolution*blanket_resolution/15) # descriminator training real dist samplling batch size
 holdout_rate = 0.8 # rate of hold out label
 
-OoTWeight = 0.005 # out of target weight in generator
+OoT_zWeight = 1 # out of target weight for latent z in generator
+OoT_yWeight = 1 # out of target weight for latent y in generator
 n_latent_sample = 5000 # latent code visualization sample
 tb_batch_size = 800  # x_inputs batch size for tb
 tb_log_step = 200  # tb logging step
@@ -68,6 +69,8 @@ real_distribution = tf.placeholder(dtype=tf.float32, shape=[None, z_dim], name='
 real_lbl = tf.placeholder(dtype=tf.float32, shape=[None,11],name = 'Real_lable')
 fake_lbl = tf.placeholder(dtype=tf.float32, shape=[None,11],name = 'Fake_lable')
 unif_z = tf.placeholder(dtype=tf.float32, shape=[blanket_resolution*blanket_resolution, z_dim], name='Uniform_z')
+unif_d = tf.placeholder(dtype=tf.float32, shape=[None,11],name = 'Uniform_digits')
+unif_y = tf.placeholder(dtype=tf.float32, shape=[None,11],name = 'Uniform_y')
 
 he_init = tf.contrib.layers.variance_scaling_initializer(mode="FAN_AVG")
 
@@ -184,17 +187,17 @@ def show_discriminator(sess,digit):
         return
     br = dc_contour_res_x*blanket_resolution
     xlist, ylist, blanket = get_blanket(br)
-    
+
     digit_v = np.zeros((len(blanket),11),dtype=np.float32)
     digit_v[:,digit] = 1.0
-
+    
     plt.rc('figure', figsize=(6, 5))
     plt.tight_layout()
     
     X, Y = np.meshgrid(xlist, ylist)    
     
     with tf.variable_scope("DiscriminatorZ"):
-        desc_result = sess.run(tf.nn.sigmoid(discriminatorZ(blanket,digit_v, reuse=True)))
+        desc_result = sess.run(tf.nn.sigmoid(discriminator(blanket,digit_v, reuse=True)))
 
     Z = np.empty((br,br), dtype="float32")    
     for i in range(br):
@@ -286,19 +289,11 @@ def decoder(z,y, reuse=False):
     output = fully_connected(last_layer, input_dim, weights_initializer=he_init, scope='Sigmoid', activation_fn=tf.sigmoid)
     return output
 
-def discriminatorZ(x,reuse=False):
+def discriminator(x,lbl,reuse=False):
     """
-    Discriminator that leanes to activate at true distribution and not for the others.
-    """
-    if reuse:
-        tf.get_variable_scope().reuse_variables()
-    last_layer = mlp_dec(x)
-    output = fully_connected(last_layer, 1, weights_initializer=he_init, scope='None',activation_fn=None)
-    return output
-
-def discriminatorY(x,lbl,reuse=False):
-    """
-    Discriminator that leanes to activate at true distribution and not for the others.
+    Discriminator Y that leanes to activate at true categorical distribution and not for the others.
+    For training, feed the same pair of x and lbl, so it will learn to activate say 3 for 3.
+    For generator training, we expect discriminatorY will activate for proper x indicated by the label
     """
     if reuse:
         tf.get_variable_scope().reuse_variables()
@@ -337,8 +332,8 @@ def standardNormal2D(batchsize):
     """
     standard normal 2d dist
     """
-    x_var = 0.5
-    y_var = 0.5
+    x_var = 1
+    y_var = 1
     x = np.random.normal(0, x_var, (batchsize, 1))
     y = np.random.normal(0, y_var, (batchsize, 1))
     z = np.append(x,y,1)
@@ -354,13 +349,14 @@ with tf.variable_scope('Decoder'):
     decoder_output = decoder(encoder_outputZ,encoder_outputY)
 
 with tf.variable_scope('DiscriminatorZ'):
-    dz_real = discriminatorZ(real_distribution)
-    dz_blanket = discriminatorZ(unif_z, reuse=True)
-    dz_fake = discriminatorZ(encoder_outputZ, reuse=True)
+    dz_real = discriminator(real_distribution, real_lbl)
+    dz_blanket = discriminator(unif_z, unif_d, reuse=True)
+    dz_fake = discriminator(encoder_outputZ, fake_lbl, reuse=True)
     
 with tf.variable_scope('DiscriminatorY'):
-    dy_real = discriminatorY(real_lbl, real_lbl)
-    dy_fake = discriminatorY(encoder_outputY, fake_lbl, reuse=True)   
+    dy_real = discriminator(real_lbl, real_lbl)
+    dy_blanket = discriminator(unif_y, unif_d, reuse=True)
+    dy_fake = discriminator(encoder_outputY, fake_lbl, reuse=True)   
     
 # loss
 with tf.name_scope("ae_loss"):
@@ -370,26 +366,32 @@ with tf.name_scope("dc_loss"):
     dc_zloss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(dz_real), logits=dz_real))
     dc_zloss_blanket = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(dz_blanket), logits=dz_blanket))
     dc_zloss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(dz_fake), logits=dz_fake))
+    
     dc_yloss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(dy_real), logits=dy_real))
+    dc_yloss_blanket = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(dy_blanket), logits=dy_blanket)) 
     dc_yloss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(dy_fake), logits=dy_fake))
-    dc_loss = dc_zloss_blanket + dc_zloss_real+dc_zloss_fake+dc_yloss_real+dc_yloss_fake
+    
+    dc_zloss = dc_zloss_blanket + dc_zloss_real+dc_zloss_fake
+    dc_yloss = dc_yloss_blanket+dc_yloss_real+dc_yloss_fake
 
 with tf.name_scope("ge_loss"):
     #Out of Target penalty
-    OoT_penaltyZ =OoTWeight*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(dz_fake), logits=dz_fake))
-    OoT_penaltyY =OoTWeight*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(dy_fake), logits=dy_fake))
+    OoT_penaltyZ =OoT_zWeight*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(dz_fake), logits=dz_fake))
+    OoT_penaltyY =OoT_yWeight*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(dy_fake), logits=dy_fake))
     generator_loss = autoencoder_loss+OoT_penaltyZ+OoT_penaltyY #not sure why it averages out
 
 #optimizer
 all_variables = tf.trainable_variables()
-dc_var = [var for var in all_variables if 'Discriminator' in var.name]
-ae_var = [var for var in all_variables if ('Encoder/' in var.name or 'Decoderdc_yloss_fake/' in var.name)]
+dc_zvar = [var for var in all_variables if 'DiscriminatorZ/' in var.name]
+dc_yvar = [var for var in all_variables if 'DiscriminatorY/' in var.name]
+ae_var = [var for var in all_variables if ('Encoder/' in var.name or 'Decoder/' in var.name)]
 
 with tf.name_scope("AE_optimizer"):
     autoencoder_optimizer = tf.train.AdamOptimizer().minimize(autoencoder_loss)
 
 with tf.name_scope("DC_optimizer"):
-    discriminator_optimizer = tf.train.AdamOptimizer().minimize(dc_loss, var_list=dc_var)
+    discriminatorZ_optimizer = tf.train.AdamOptimizer().minimize(dc_zloss, var_list=dc_zvar)
+    discriminatorY_optimizer = tf.train.AdamOptimizer().minimize(dc_yloss, var_list=dc_yvar)
     
 with tf.name_scope("GE_optimizer"):
     generator_optimizer = tf.train.AdamOptimizer().minimize(generator_loss, var_list=ae_var)
@@ -402,7 +404,8 @@ generated_images = tf.reshape(decoder_output, [-1, 28, 28, 1])
 
 # Tensorboard visualizationdegit_v
 ae_sm = tf.summary.scalar(name='Autoencoder_Loss', tensor=autoencoder_loss)
-dc_sm = tf.summary.scalar(name='Discriminator_Loss', tensor=dc_loss)
+dcz_sm = tf.summary.scalar(name='Discriminator_ZLoss', tensor=dc_zloss)
+dcy_sm = tf.summary.scalar(name='Discriminator_YLoss', tensor=dc_yloss)
 ge_sm = tf.summary.scalar(name='Generator_Loss', tensor=generator_loss)
 ootz_sm = tf.summary.scalar(name='OoT_penaltyZ', tensor=OoT_penaltyZ)
 ooty_sm = tf.summary.scalar(name='OoT_penaltyY', tensor=OoT_penaltyY)
@@ -424,14 +427,9 @@ def tb_init(sess): # create tb path, model path and return tb writer and saved m
 
 def tb_write(sess):
     batch_x, batch_y = mnist.train.next_batch(tb_batch_size)
-    #batch_y_fl = batch_y.astype(float)
-    
-    # increase batch size for tb to show stable stats and extend freq?            
-    dc_real_lbl = np.eye(11)[np.array(np.random.randint(0,11, size=dc_real_batch_size)).reshape(-1)]
-    dc_real_dist = standardNormal2D(dc_real_batch_size)
-
+    #reuse the others
     sm = sess.run(summary_op,feed_dict={x_input: batch_x, real_distribution:dc_real_dist,\
-             real_lbl:dc_real_lbl ,unif_z:blanket, fake_lbl:batch_y})
+             real_lbl:dc_real_lbl ,unif_z:blanket, unif_d:blanket_d, unif_y:blanket_y, fake_lbl:batch_y})
     writer.add_summary(sm, global_step=step)
 
 with tf.Session() as sess:
@@ -446,11 +444,14 @@ with tf.Session() as sess:
                 batch_x, batch_y = mnist.train.next_batch(ac_batch_size)
                 
                 # real batch uniform sampling for each lable and unknown label. This is not constrained by lable availability.
-                dc_real_lbl = np.eye(11)[np.array(np.random.randint(0,11, size=dc_real_batch_size)).reshape(-1)]
+                dc_real_lbl = np.eye(11)[np.array(np.random.randint(0,11, size=dc_real_batch_size)).reshape(-1)]+np.random.normal(0,0.5)
                 dc_real_dist = standardNormal2D(dc_real_batch_size)# or maybe we can make this only smaller
                 
-                sess.run([discriminator_optimizer],feed_dict={x_input: batch_x, real_distribution:dc_real_dist,\
-                         real_lbl:dc_real_lbl ,unif_z:blanket, fake_lbl:batch_y})
+                blanket_d = np.eye(11)[np.array(np.random.randint(0,11, size=blanket_resolution*blanket_resolution)).reshape(-1)]
+                blanket_y = np.random.uniform(-10, 10, (blanket_resolution*blanket_resolution,11))
+                sess.run([discriminatorZ_optimizer,discriminatorY_optimizer],feed_dict={x_input: batch_x, real_distribution:dc_real_dist,\
+                         real_lbl:dc_real_lbl ,unif_z:blanket, unif_d:blanket_d, unif_y:blanket_y, fake_lbl:batch_y})
+                
                 #Generator
                 sess.run([generator_optimizer],feed_dict={x_input: batch_x,fake_lbl:batch_y})
                 if b % tb_log_step == 0:
@@ -464,9 +465,8 @@ with tf.Session() as sess:
         model_restore(saver,mode,model_folder)
         show_inout(sess, op=decoder_output) 
         dc_real_lbl = np.eye(11)[np.array(np.random.randint(-1,10, size=5000)).reshape(-1)]        
-        dc_real_dist = gaussian_mixture(5000, n_leaves,dc_real_lbl)
-        show_real_dist(dc_real_dist,dc_real_lbl)
-        show_discriminator(sess,-1)    
+        dc_real_dist = standardNormal2D(500)
+        show_discriminator(sess,0)    
         show_discriminator(sess,5)
         show_discriminator(sess,8)
         show_latent_code(sess,n_latent_sample)
