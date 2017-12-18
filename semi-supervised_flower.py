@@ -14,8 +14,8 @@ modes:
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
 exptitle =  '10Lf' #experiment title that goes in tensorflow folder name
-mode=1 
-flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
+mode=0
+flg_graph = True # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
 n_epochs_ge = 90*n_leaves # mode 3, generator training epochs
