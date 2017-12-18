@@ -14,21 +14,21 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  '10Lf_TestAccuracy_SemiSbatch1000' #experiment title that goes in tensorflow folder name
+exptitle =  '10Lf_Cl001' #experiment title that goes in tensorflow folder name
 mode = 1
 flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
 n_epochs_ge = 150*n_leaves # mode 3, generator training epochs
 ac_batch_size = 500  # autoencoder training batch size
-semi_sup_batch_size = 1000 # semi-supervised training batch size
+semi_sup_batch_size = 32 # semi-supervised training batch size
 import numpy as np
 blanket_resolution = 10*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
 dc_real_batch_size = int(blanket_resolution*blanket_resolution/15) # descriminator training real dist samplling batch size
 n_label = 1000 # number of labels used in semi-supervised training
 
 OoTWeight = 0.01 # out of target weight in generator
-ClassificationWeight = 0.1 #classification weight in generator
+ClassificationWeight = 0.01 #classification weight in generator
 Yreg_weight = 0.01 # Y regulation or distance to vertex weight
 n_latent_sample = 5000 # latent code visualization sample
 tb_batch_size = 800  # x_inputs batch size for tb
@@ -429,11 +429,11 @@ def tb_init(sess): # create tb path, model path and return tb writer and saved m
     return writer, saved_model_path
 
 def tb_write(sess):
-    batch_x, batch_y = mnist.train.next_batch(tb_batch_size) #bigger batch to see ae_loss with stability
-    test_x, test_y = mnist.test.next_batch(1000) # to evalute accuracy with unseen data.
+    #batch_x, batch_y = mnist.train.next_batch(tb_batch_size) #bigger batch to see ae_loss with stability
+    test_x, test_y = mnist.test.next_batch(tb_batch_size) # to evalute accuracy with unseen data.
     # use the priviousely generated data for others
-    sm = sess.run(summary_op,feed_dict={x_input: batch_x, real_distribution:dc_real_z,\
-             real_lbl:dc_real_lbl ,unif_z:blanket, unif_d:dc_blanket_digit, trainer_input:test_x,trainer_lbl:test_y,fake_lbl:batch_y})
+    sm = sess.run(summary_op,feed_dict={x_input: test_x, real_distribution:dc_real_z,\
+             real_lbl:dc_real_lbl ,unif_z:blanket, unif_d:dc_blanket_digit, trainer_input:train_x,trainer_lbl:train_y,fake_lbl:test_y})
     writer.add_summary(sm, global_step=step)
 
 with tf.Session() as sess:
