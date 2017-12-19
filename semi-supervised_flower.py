@@ -6,7 +6,6 @@ ref: https://github.com/Naresh1318/Adversarial_Autoencoder
 : show flower as visualization
 : stop when autoencoder loss increase on validation set
 : drop out
-: elu?
 : variable on CPU
 : run 8 runs
 : categorical descriminator
@@ -20,7 +19,7 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  '10Lf_Cl001' #experiment title that goes in tensorflow folder name
+exptitle =  '10Lf_base' #experiment title that goes in tensorflow folder name
 mode = 1
 flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
@@ -220,9 +219,9 @@ def show_discriminator(sess,digit):
     plt.show()   
     plt.close()
     
-def show_real_dist(z_real_dist, real_lbl_ins):
+def show_z_dist(z_real_dist):
     """
-    Shows real distribution
+    Shows z distribution
     Parameters. z_real_dist:(batch_size,2) numpy array
     No return. Displays image.
     """
@@ -231,16 +230,11 @@ def show_real_dist(z_real_dist, real_lbl_ins):
     plt.rc('figure', figsize=(5, 5))
     plt.tight_layout()
     fig, ax = plt.subplots(1)
-    cm = matplotlib.colors.ListedColormap(myColor)
 
-    for i in range(0,n_leaves):
-        y=z_real_dist[np.where(real_lbl_ins[:,i]==1),1]
-        x=z_real_dist[np.where(real_lbl_ins[:,i]==1),0]
-        color = cm(i+1)
-        ax.scatter(x,y,label=str(i), alpha=0.9, facecolor=color, linewidth=0.15,s = 5)
+    ax.scatter(z_real_dist[:,0],z_real_dist[:,1], alpha=0.9, linewidth=0.15,s = 5)
 
     ax.legend(loc='center left',  markerscale = 5, bbox_to_anchor=(1, 0.5))
-    ax.set_title('Real Distribution')
+    ax.set_title('Real Z Distribution')
     
     plt.xlim(xLU[0],xLU[1])
     plt.ylim(yLU[0],yLU[1])
@@ -340,6 +334,11 @@ def gaussian_mixture(batchsize, num_leaves, sel):
             #sample(x[batch, zi], y[batch, zi], s, num_leaves)
     return z
 
+def gaussian(batchsize):
+    """
+    Crate true z, 2D standard normal distribution
+    """
+    return np.random.normal(0, 1, (batchsize, 2))
  
 """
 Defining key operations, Loess, Optimizer and other necessary operations
@@ -457,7 +456,7 @@ with tf.Session() as sess:
                 
                 # random label as a selector to train z descriminator for flower graph 
                 dc_real_lbl = np.eye(10)[np.array(np.random.randint(0,n_leaves, size=dc_real_batch_size)).reshape(-1)]
-                dc_real_z = gaussian_mixture(dc_real_batch_size, n_leaves,dc_real_lbl)
+                dc_real_z = gaussian(dc_real_batch_size)
                 dc_blanket_digit = np.eye(10)[np.array(np.random.randint(0,n_leaves, size=blanket_resolution*blanket_resolution)).reshape(-1)]
                 
                 sess.run([discriminator_optimizer],feed_dict={x_input: batch_x, real_distribution:dc_real_z,\
@@ -475,10 +474,9 @@ with tf.Session() as sess:
         writer.close()
     if mode==0: # showing the latest model result. InOut, true dist, discriminator, latent dist.
         model_restore(saver,mode,model_folder)
-        show_inout(sess, op=decoder_output) 
-        dc_real_lbl = np.eye(10)[np.array(np.random.randint(0,n_leaves, size=5000)).reshape(-1)]        
-        dc_real_dist = gaussian_mixture(5000, n_leaves,dc_real_lbl)
-        show_real_dist(dc_real_dist,dc_real_lbl)
+        show_inout(sess, op=decoder_output)         
+        real_z= gaussian(5000)
+        show_z_dist(real_z)
         show_discriminator(sess,0)    
         show_discriminator(sess,5)
         show_discriminator(sess,8)
