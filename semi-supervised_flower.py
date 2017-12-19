@@ -3,11 +3,10 @@
 Created on Thu Nov 16 11:50:32 2017
 ref: https://github.com/Naresh1318/Adversarial_Autoencoder
 @author: mtodaka
-: show accuracy on test
+: ck operations on devices, meomry load inc
+: run 8 runs
 : stop when autoencoder loss increase on validation set
 : drop out
-: variable on CPU
-: run 8 runs
 : categorical descriminator
 : separate? reconstruction, descriminator, generater, semi-supervised
 : learning rate schedule
@@ -19,9 +18,9 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  '10Lf_base_descZrefactoring' #experiment title that goes in tensorflow folder name
-mode = 0
-flg_graph = True # showing graphs or not during the training. Showing graphs significantly slows down the training.
+exptitle =  'lbl1000base_variableonGPU_2nd' #experiment title that goes in tensorflow folder name
+mode = 1
+flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
 n_epochs_ge = 20*n_leaves # mode 3, generator training epochs
@@ -77,6 +76,16 @@ he_init = tf.contrib.layers.variance_scaling_initializer(mode="FAN_AVG")
 """
 Util Functions
 """
+
+def variables_on_cpu(op):
+    """
+    Placing variables on CPU, partially to save GPU memory and utilize the main system RAM
+    """
+    if op.type not in ['Variable', 'VariableV2', 'VarHandleOp']:
+        return "/gpu:0"
+    else:
+        return "/cpu:0"
+
 def form_results():
     """
     Forms folders for each run to store the tensorboard files, saved models and the log files.
@@ -151,10 +160,8 @@ def show_inout(sess,op):
 
 def show_latent_code(sess):
     """
-    Shows latent codes distribution based on all MNIST training images, with lables as color.
+    Shows latent codes distribution (y and z) based on all MNIST test images, and print accuracy
     Parameters. seess:TF session.
-                spc: sample per class
-    No return. Displays image.
     """
     if not flg_graph:
         return
@@ -166,7 +173,7 @@ def show_latent_code(sess):
     train_yi = np.argmax(train_ys, axis=1) 
     zm = gaussian_mixture(train_zs, n_leaves, train_yi)
     train_lbl = mnist[2].labels
-    
+    train_lbli = np.argmax(train_lbl, axis=1)
     cm = matplotlib.colors.ListedColormap(myColor)
     fig, ax = plt.subplots(1)
     
@@ -180,6 +187,9 @@ def show_latent_code(sess):
     ax.set_title('2D latent code')    
     plt.show()
     plt.close()
+    
+    test_accuracy = 100.0*np.mean(np.equal(train_lbli, train_yi))
+    print("Test Accuracy:{}%".format(test_accuracy))
     
 def show_z_discriminator(sess):
     """
@@ -422,44 +432,48 @@ def tb_write(sess):
             ,unif_z:blanket, trainer_input:train_x,trainer_lbl:train_y,fake_lbl:test_y})
     writer.add_summary(sm, global_step=step)
 
-with tf.Session() as sess:
-    if mode==1: # Latent regulation
-        writer,saved_model_path = tb_init(sess)   
-        _,_,blanket = get_blanket(blanket_resolution)
-        n_batches = int(mnist.train.num_examples / ac_batch_size)
-        train_x, train_y = mnist.train.next_batch(n_label)
-        test_x, test_y = mnist.test.next_batch(n_label)
-        for i in range(n_epochs_ge):
-            print("------------------Epoch {}/{} ------------------".format(i, n_epochs_ge))
-            for b in tqdm(range(n_batches)):    
-                #Discriminator
-                batch_x, _ = mnist.train.next_batch(ac_batch_size)
-                
-                # random label as a selector to train z descriminator for flower graph 
-                dc_real_lbl = np.eye(10)[np.array(np.random.randint(0,n_leaves, size=dc_real_batch_size)).reshape(-1)]
-                dc_real_z = gaussian(dc_real_batch_size)
-
-                sess.run([discriminator_optimizer],feed_dict={x_input: batch_x, \
-                         real_distribution:dc_real_z,unif_z:blanket})
+config = tf.ConfigProto()
+config.log_device_placement = True
+config.gpu_options.per_process_gpu_memory_fraction = 0.40
+with tf.Session(config=config) as sess:
+    #with tf.device(variables_on_cpu):
+        if mode==1: # Latent regulation
+            writer,saved_model_path = tb_init(sess)   
+            _,_,blanket = get_blanket(blanket_resolution)
+            n_batches = int(mnist.train.num_examples / ac_batch_size)
+            train_x, train_y = mnist.train.next_batch(n_label)
+            test_x, test_y = mnist.test.next_batch(n_label)
+            for i in range(n_epochs_ge):
+                print("------------------Epoch {}/{} ------------------".format(i, n_epochs_ge))
+                for b in tqdm(range(n_batches)):    
+                    #Discriminator
+                    batch_x, _ = mnist.train.next_batch(ac_batch_size)
+                    
+                    # random label as a selector to train z descriminator for flower graph 
+                    dc_real_lbl = np.eye(10)[np.array(np.random.randint(0,n_leaves, size=dc_real_batch_size)).reshape(-1)]
+                    dc_real_z = gaussian(dc_real_batch_size)
     
-                #Generator - autoencoder, fooling descriminator, and y semi-supervised classification
-                train_xb, train_yb = next_batch(train_x,train_y,semi_sup_batch_size)
-                sess.run([generator_optimizer],feed_dict={x_input: batch_x,trainer_input:train_xb, trainer_lbl:train_yb})
-                if b % tb_log_step == 0:
-                    show_z_discriminator(sess) #shows others like 3, 7 -1 ?
-                    show_latent_code(sess)
-                    tb_write(sess)
-                step += 1
-        saver.save(sess, save_path=saved_model_path, global_step=step, write_meta_graph = True)
-        writer.close()
-    if mode==0: # showing the latest model result. InOut, true dist, discriminator, latent dist.
-        model_restore(saver,mode,model_folder)
-        show_inout(sess, op=decoder_output)         
-        real_z= gaussian(5000)
-        show_z_dist(real_z)
-        show_z_discriminator(sess)    
-        show_latent_code(sess)
-        print("Test Accuracy:{}".format(1.0))
+                    sess.run([discriminator_optimizer],feed_dict={x_input: batch_x, \
+                             real_distribution:dc_real_z,unif_z:blanket})
         
-    
+                    #Generator - autoencoder, fooling descriminator, and y semi-supervised classification
+                    train_xb, train_yb = next_batch(train_x,train_y,semi_sup_batch_size)
+                    sess.run([generator_optimizer],feed_dict={x_input: batch_x,trainer_input:train_xb, trainer_lbl:train_yb})
+                    if b % tb_log_step == 0:
+                        show_z_discriminator(sess) #shows others like 3, 7 -1 ?
+                        show_latent_code(sess)
+                        tb_write(sess)
+                    step += 1
+            saver.save(sess, save_path=saved_model_path, global_step=step, write_meta_graph = True)
+            writer.close()
+        if mode==0: # showing the latest model result. InOut, true dist, discriminator, latent dist.
+            model_restore(saver,mode,model_folder)
+            show_inout(sess, op=decoder_output)         
+            real_z= gaussian(5000)
+            show_z_dist(real_z)
+            show_z_discriminator(sess)    
+            show_latent_code(sess)
+            
+            
+        
         

@@ -10,9 +10,9 @@ def clulster_face(num_l, sel):
     r = (2.0 * np.pi / float(num_l)) * sel
     new_x = shift * np.cos(r)
     new_y = shift * np.sin(r)
-    return np.array([new_x, new_y]).reshape((,2))
+    return np.transpose(np.array([new_x, new_y])).reshape((len(sel),2))
 
-selector = np.array([0,1,2,3,4,5])
+selector = np.array([0,1])
 
 face = clulster_face(10,selector)
 
