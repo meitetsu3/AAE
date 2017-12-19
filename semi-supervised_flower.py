@@ -3,6 +3,12 @@
 Created on Thu Nov 16 11:50:32 2017
 ref: https://github.com/Naresh1318/Adversarial_Autoencoder
 @author: mtodaka
+: show flower as visualization
+: stop when autoencoder loss increase on validation set
+: drop out
+: elu?
+: variable on CPU
+: run 8 runs
 : categorical descriminator
 : separate? reconstruction, descriminator, generater, semi-supervised
 : learning rate schedule
@@ -19,7 +25,7 @@ mode = 1
 flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
-n_epochs_ge = 150*n_leaves # mode 3, generator training epochs
+n_epochs_ge = 20*n_leaves # mode 3, generator training epochs
 ac_batch_size = 500  # autoencoder training batch size
 semi_sup_batch_size = 32 # semi-supervised training batch size
 import numpy as np
