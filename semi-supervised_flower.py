@@ -30,12 +30,16 @@ import numpy as np
 blanket_resolution = 10*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
 dc_real_batch_size = int(blanket_resolution*blanket_resolution/15) # descriminator training real dist samplling batch size
 n_label = 1000 # number of labels used in semi-supervised training
-
 OoTWeight = 0.01 # out of target weight in generator
 ClassificationWeight = 0.01 #classification weight in generator
 Yreg_weight = 0.01 # Y regulation or distance to vertex weight
 tb_batch_size = 800  # x_inputs batch size for tb
 tb_log_step = 200  # tb logging step
+import tensorflow as tf
+config = tf.ConfigProto()
+config.log_device_placement = True
+config.gpu_options.per_process_gpu_memory_fraction = 0.40
+
 dc_contour_res_x = 5 # x to the blanket resolution for descriminator contour plot
 myColor = ['black','orange', 'red', 'blue','gray','green','pink','cyan','lime','magenta']
 input_dim = 784
@@ -46,7 +50,7 @@ n_l2 = 1000
 z_dim = 2
 results_path = './Results/Adversarial_Autoencoder'
 
-import tensorflow as tf
+
 from tensorflow.contrib.layers import fully_connected
 from datetime import datetime
 import os
@@ -432,11 +436,8 @@ def tb_write(sess):
             ,unif_z:blanket, trainer_input:train_x,trainer_lbl:train_y,fake_lbl:test_y})
     writer.add_summary(sm, global_step=step)
 
-config = tf.ConfigProto()
-config.log_device_placement = True
-config.gpu_options.per_process_gpu_memory_fraction = 0.40
 with tf.Session(config=config) as sess:
-    #with tf.device(variables_on_cpu):
+    with tf.device(variables_on_cpu):
         if mode==1: # Latent regulation
             writer,saved_model_path = tb_init(sess)   
             _,_,blanket = get_blanket(blanket_resolution)
