@@ -4,6 +4,7 @@ Created on Thu Nov 16 11:50:32 2017
 ref: https://github.com/Naresh1318/Adversarial_Autoencoder
 @author: mtodaka
 : show flower as visualization
+: show accuracy on test
 : stop when autoencoder loss increase on validation set
 : drop out
 : variable on CPU
@@ -19,7 +20,7 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  '10Lf_base' #experiment title that goes in tensorflow folder name
+exptitle =  '10Lf_base_descZrefactoring' #experiment title that goes in tensorflow folder name
 mode = 1
 flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
@@ -70,8 +71,6 @@ labels_fixedcopy = mnist.train.labels # keeping original label
 x_input = tf.placeholder(dtype=tf.float32, shape=[None, input_dim], name='Input')
 real_distribution = tf.placeholder(dtype=tf.float32, shape=[None, z_dim], name='Real_distribution')
 unif_z = tf.placeholder(dtype=tf.float32, shape=[blanket_resolution*blanket_resolution, z_dim], name='Uniform_z')
-real_lbl = tf.placeholder(dtype=tf.float32, shape=[None,10],name = 'Real_lable')
-unif_d = tf.placeholder(dtype=tf.float32, shape=[None,10],name = 'Uniform_digits')
 fake_lbl = tf.placeholder(dtype=tf.float32, shape=[None,10],name = 'fake_lbl')
 trainer_lbl = tf.placeholder(dtype=tf.float32, shape=[None,10],name = 'trainer_lbl')
 trainer_input = tf.placeholder(dtype=tf.float32, shape=[None, input_dim], name='trainer_input')
@@ -184,9 +183,9 @@ def show_latent_code(sess,spc):
     plt.show()
     plt.close()
     
-def show_discriminator(sess,digit):
+def show_z_discriminator(sess):
     """
-    Shows discriminator activation contour plot. Close to 1 means estimated as positive (true dist).
+    Shows z discriminator activation contour plot. Close to 1 means estimated as positive (true dist).
     Parameters. seess:TF session.
     No return. Displays image.
     """
@@ -194,9 +193,6 @@ def show_discriminator(sess,digit):
         return
     br = dc_contour_res_x*blanket_resolution
     xlist, ylist, blanket = get_blanket(br)
-    
-    digit_v = np.zeros((len(blanket),10),dtype=np.float32)
-    digit_v[:,digit] = 1.0
 
     plt.rc('figure', figsize=(6, 5))
     plt.tight_layout()
@@ -204,7 +200,7 @@ def show_discriminator(sess,digit):
     X, Y = np.meshgrid(xlist, ylist)    
     
     with tf.variable_scope("Discriminator"):
-        desc_result = sess.run(tf.nn.sigmoid(discriminator(blanket,digit_v, reuse=True)))
+        desc_result = sess.run(tf.nn.sigmoid(discriminator_z(blanket, reuse=True)))
 
     Z = np.empty((br,br), dtype="float32")    
     for i in range(br):
@@ -215,7 +211,7 @@ def show_discriminator(sess,digit):
     cp = ax.contourf(X, Y, Z)
     plt.colorbar(cp)
     ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-    ax.set_title('Descriminator Contour for digit '+ str(digit))    
+    ax.set_title('Z Descriminator Contour')    
     plt.show()   
     plt.close()
     
@@ -292,17 +288,16 @@ def decoder(z,y, reuse=False):
     output = fully_connected(last_layer, input_dim, weights_initializer=he_init,scope='Sigmoid', activation_fn=tf.sigmoid)
     return output
 
-def discriminator(x, dg, reuse=False):
+def discriminator_z(x, reuse=False):
     """encoder
     Discriminator that leanes to activate at true distribution and not for the others.
     :param x: tensor of shape [batch_size, z_dim]
-    :param dg: one-hot-vector as a selector of a leaf.
     :param reuse: True -> Reuse the discriminator variables, False -> Create the variables
     :return: tensor of shape [batch_size, 1]. I think it's better to take sigmoid here.
     """
     if reuse:
         tf.get_variable_scope().reuse_variables()
-    last_layer = mlp_dec(tf.concat([x,dg],1))
+    last_layer = mlp_dec(x)
     output = fully_connected(last_layer, 1, weights_initializer=he_init, scope='None',activation_fn=None)
     return output
 
@@ -351,9 +346,9 @@ with tf.variable_scope('Decoder'):
     decoder_output = decoder(encoder_outputZ,tf.one_hot(tf.argmax(encoder_outputYlogits, dimension = 1), depth = n_leaves))
     
 with tf.variable_scope('Discriminator'):
-    d_real = discriminator(real_distribution,real_lbl)
-    d_blanket = discriminator(unif_z, unif_d, reuse=True)
-    d_fake = discriminator(encoder_outputZ,tf.one_hot(tf.argmax(encoder_outputYlogits, dimension = 1), depth = n_leaves), reuse=True)
+    d_real = discriminator_z(real_distribution)
+    d_blanket = discriminator_z(unif_z, reuse=True)
+    d_fake = discriminator_z(encoder_outputZ,reuse=True)
     
 # loss 
 with tf.name_scope('Y_regulation'):
@@ -437,8 +432,8 @@ def tb_write(sess):
     #batch_x, batch_y = mnist.train.next_batch(tb_batch_size) #bigger batch to see ae_loss with stability
     test_x, test_y = mnist.test.next_batch(tb_batch_size) # to evalute accuracy with unseen data.
     # use the priviousely generated data for others
-    sm = sess.run(summary_op,feed_dict={x_input: test_x, real_distribution:dc_real_z,\
-             real_lbl:dc_real_lbl ,unif_z:blanket, unif_d:dc_blanket_digit, trainer_input:train_x,trainer_lbl:train_y,fake_lbl:test_y})
+    sm = sess.run(summary_op,feed_dict={x_input: test_x, real_distribution:dc_real_z\
+            ,unif_z:blanket, trainer_input:train_x,trainer_lbl:train_y,fake_lbl:test_y})
     writer.add_summary(sm, global_step=step)
 
 with tf.Session() as sess:
@@ -457,16 +452,15 @@ with tf.Session() as sess:
                 # random label as a selector to train z descriminator for flower graph 
                 dc_real_lbl = np.eye(10)[np.array(np.random.randint(0,n_leaves, size=dc_real_batch_size)).reshape(-1)]
                 dc_real_z = gaussian(dc_real_batch_size)
-                dc_blanket_digit = np.eye(10)[np.array(np.random.randint(0,n_leaves, size=blanket_resolution*blanket_resolution)).reshape(-1)]
-                
-                sess.run([discriminator_optimizer],feed_dict={x_input: batch_x, real_distribution:dc_real_z,\
-                         real_lbl:dc_real_lbl ,unif_z:blanket, unif_d:dc_blanket_digit})
+
+                sess.run([discriminator_optimizer],feed_dict={x_input: batch_x, \
+                         real_distribution:dc_real_z,unif_z:blanket})
     
                 #Generator - autoencoder, fooling descriminator, and y semi-supervised classification
                 train_xb, train_yb = next_batch(train_x,train_y,semi_sup_batch_size)
                 sess.run([generator_optimizer],feed_dict={x_input: batch_x,trainer_input:train_xb, trainer_lbl:train_yb})
                 if b % tb_log_step == 0:
-                    show_discriminator(sess,1) #shows others like 3, 7 -1 ?
+                    show_z_discriminator(sess) #shows others like 3, 7 -1 ?
                     show_latent_code(sess,n_latent_sample)
                     tb_write(sess)
                 step += 1
@@ -477,9 +471,7 @@ with tf.Session() as sess:
         show_inout(sess, op=decoder_output)         
         real_z= gaussian(5000)
         show_z_dist(real_z)
-        show_discriminator(sess,0)    
-        show_discriminator(sess,5)
-        show_discriminator(sess,8)
+        show_z_discriminator(sess)    
         show_latent_code(sess,n_latent_sample)
         
     
