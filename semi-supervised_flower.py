@@ -3,9 +3,8 @@
 Created on Thu Nov 16 11:50:32 2017
 ref: https://github.com/Naresh1318/Adversarial_Autoencoder
 @author: mtodaka
-: ck operations on devices, meomry load inc
-: stop when autoencoder loss increase on validation set
 : drop out
+: stop when autoencoder loss increase on validation set
 : categorical descriminator
 : separate? reconstruction, descriminator, generater, semi-supervised
 : learning rate schedule
@@ -17,18 +16,19 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  'lbl1000base' #experiment title that goes in tensorflow folder name
+exptitle =  'lbl600baseOpt' #experiment title that goes in tensorflow folder name
 mode = 1
 flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
-n_epochs_ge = 20*n_leaves # mode 3, generator training epochs
+n_epochs_ge = 30*n_leaves # mode 3, generator training epochs
 ac_batch_size = 500  # autoencoder training batch size
 semi_sup_batch_size = 32 # semi-supervised training batch size
+keep_prob = 0.95 # keep probability of drop out
 import numpy as np
 blanket_resolution = 10*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
 dc_real_batch_size = int(blanket_resolution*blanket_resolution/15) # descriminator training real dist samplling batch size
-n_label = 1000 # number of labels used in semi-supervised training
+n_label = 800 # number of labels used in semi-supervised training
 OoTWeight = 0.01 # out of target weight in generator
 ClassificationWeight = 0.01 #classification weight in generator
 Yreg_weight = 0.01 # Y regulation or distance to vertex weight
@@ -36,8 +36,8 @@ tb_batch_size = 800  # x_inputs batch size for tb
 tb_log_step = 200  # tb logging step
 import tensorflow as tf
 config = tf.ConfigProto()
-config.log_device_placement = True
-config.allow_soft_placement=True
+#config.log_device_placement = True
+#config.allow_soft_placement=True
 config.gpu_options.per_process_gpu_memory_fraction = 0.2 # can run up to 4 threads on main GPU, and 5 on others.
 
 dc_contour_res_x = 5 # x to the blanket resolution for descriminator contour plot
@@ -52,6 +52,7 @@ results_path = './Results/Adversarial_Autoencoder'
 
 
 from tensorflow.contrib.layers import fully_connected
+from tensorflow.contrib.layers import dropout
 from datetime import datetime
 import os
 import matplotlib
@@ -75,22 +76,12 @@ unif_z = tf.placeholder(dtype=tf.float32, shape=[blanket_resolution*blanket_reso
 fake_lbl = tf.placeholder(dtype=tf.float32, shape=[None,10],name = 'fake_lbl')
 trainer_lbl = tf.placeholder(dtype=tf.float32, shape=[None,10],name = 'trainer_lbl')
 trainer_input = tf.placeholder(dtype=tf.float32, shape=[None, input_dim], name='trainer_input')
-
+is_training = tf.placeholder(tf.bool, shape=(), name='is_training')
 he_init = tf.contrib.layers.variance_scaling_initializer(mode="FAN_AVG")
 
 """
 Util Functions
 """
-
-def variables_on_cpu(op):
-    """
-    Placing variables on CPU, partially to save GPU memory and utilize the main system RAM
-    Not sure if this is actually impacting any. Need to check with TB.
-    """
-    if op.type not in ['Variable', 'VariableV2', 'VarHandleOp']:
-        return '/gpu:0'
-    else:
-        return '/cpu:0'
 
 def form_results():
     """
@@ -146,7 +137,7 @@ def show_inout(sess,op):
         return
     idx = random.sample(range(mnist[0].num_examples),ac_batch_size)
     img_in = mnist[0].images[idx,:]
-    img_out = sess.run(op, feed_dict={x_input: img_in})
+    img_out = sess.run(op, feed_dict={x_input: img_in,is_training:False})
     img_out_s = img_out.reshape(ac_batch_size,28,28)
     img_in_s = img_in.reshape(ac_batch_size,28,28)
     #.reshape(10,28,28)
@@ -175,7 +166,7 @@ def show_latent_code(sess):
     plt.tight_layout()
     
     with tf.variable_scope("Encoder"):
-        train_zs,train_ys = sess.run(encoder(mnist[2].images, reuse=True)) #2 is test, 10k images
+        train_zs,train_ys = sess.run(encoder(mnist[2].images, reuse=True), feed_dict={is_training:False}) #2 is test, 10k images
     train_yi = np.argmax(train_ys, axis=1) 
     zm = gaussian_mixture(train_zs, n_leaves, train_yi)
     train_lbl = mnist[2].labels
@@ -214,7 +205,7 @@ def show_z_discriminator(sess):
     X, Y = np.meshgrid(xlist, ylist)    
     
     with tf.variable_scope("Discriminator"):
-        desc_result = sess.run(tf.nn.sigmoid(discriminator_z(blanket, reuse=True)))
+        desc_result = sess.run(tf.nn.sigmoid(discriminator_z(blanket, reuse=True)),feed_dict={is_training:False})
 
     Z = np.empty((br,br), dtype="float32")    
     for i in range(br):
@@ -259,17 +250,23 @@ def mlp_enc(x): # multi layer perceptron
     with tf.contrib.framework.arg_scope(
             [fully_connected],
             weights_initializer=he_init):
-        elu1 = fully_connected(x, n_l1,scope='elu1')
-        elu2 = fully_connected(elu1, n_l2,scope='elu2')
-    return elu2
+        X_drop = dropout(x, keep_prob, is_training = is_training)
+        relu1 = fully_connected(X_drop, n_l1,scope='relu1')
+        relu1_drop = dropout(relu1, keep_prob, is_training=is_training)
+        relu2 = fully_connected(relu1_drop, n_l2,scope='relu2')
+        relu2_drop = dropout(relu2, keep_prob, is_training=is_training)
+    return relu2_drop
 
 def mlp_dec(x): # multi layer perceptron
     with tf.contrib.framework.arg_scope(
             [fully_connected],
             weights_initializer=he_init):
-        elu2 = fully_connected(x, n_l2,scope='elu2')
-        elu1 = fully_connected(elu2, n_l1,scope='elu1')
-    return elu1
+        X_drop = dropout(x, keep_prob, is_training = is_training)
+        relu2 = fully_connected(X_drop, n_l2,scope='relu2')
+        relu2_drop = dropout(relu2, keep_prob, is_training=is_training)
+        relu1 = fully_connected(relu2_drop, n_l1,scope='relu1')
+        relu1_drop = dropout(relu1, keep_prob, is_training=is_training)
+    return relu1_drop
 
 def encoder(x, reuse=False):
     """
@@ -358,7 +355,9 @@ with tf.name_scope('Y_regulation'):
         Yonehot = tf.one_hot(tf.argmax(encoder_outputYlogits, dimension = 1), depth = n_leaves)
         Ysoftmax = tf.nn.softmax(encoder_outputYlogits)
         dist_to_vertex = Yreg_weight*tf.reduce_mean(tf.reduce_sum(tf.square( Yonehot- encoder_outputYlogits),axis=1))
-
+        maxlogit = tf.reduce_max(encoder_outputYlogits)
+        minlogit = tf.reduce_min(encoder_outputYlogits)
+        
 with tf.name_scope("dc_loss"):
     dc_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(d_real), logits=d_real))
     dc_loss_blanket = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(d_blanket), logits=d_blanket))
@@ -414,6 +413,9 @@ cll_sm = tf.summary.scalar(name='Classification_Loss', tensor=classification_los
 acc_sm = tf.summary.scalar(name='Accuracy', tensor=accuracy)
 tac_sm = tf.summary.scalar(name='Training_Accuracy', tensor=t_accuracy)
 dtv_sm = tf.summary.scalar(name='Distance_to_Vertex', tensor=dist_to_vertex)
+mxl_sm = tf.summary.scalar(name='maxlogit', tensor=maxlogit)
+mnl_sm = tf.summary.scalar(name='minlogit', tensor=minlogit)
+
 summary_op = tf.summary.merge_all()
 
 # Creating saver and get ready
@@ -435,7 +437,7 @@ def tb_write(sess):
     test_x, test_y = mnist.test.next_batch(tb_batch_size) # to evalute accuracy with unseen data.
     # use the priviousely generated data for others
     sm = sess.run(summary_op,feed_dict={x_input: test_x, real_distribution:dc_real_z\
-            ,unif_z:blanket, trainer_input:train_x,trainer_lbl:train_y,fake_lbl:test_y})
+            ,unif_z:blanket, trainer_input:train_x,trainer_lbl:train_y,fake_lbl:test_y,is_training:False})
     writer.add_summary(sm, global_step=step)
 
 with tf.Session(config=config) as sess:
@@ -455,10 +457,11 @@ with tf.Session(config=config) as sess:
                 dc_real_z = gaussian(dc_real_batch_size)
 
                 sess.run([discriminator_optimizer],feed_dict={x_input: batch_x, \
-                         real_distribution:dc_real_z,unif_z:blanket})
+                         real_distribution:dc_real_z,unif_z:blanket,is_training:True})
                 #Generator - autoencoder, fooling descriminator, and y semi-supervised classification
                 train_xb, train_yb = next_batch(train_x,train_y,semi_sup_batch_size)
-                sess.run([generator_optimizer],feed_dict={x_input: batch_x,trainer_input:train_xb, trainer_lbl:train_yb})
+                sess.run([generator_optimizer],feed_dict={x_input: batch_x,trainer_input:train_xb, \
+                         trainer_lbl:train_yb,is_training:True})
                 if b % tb_log_step == 0:
                     show_z_discriminator(sess) #shows others like 3, 7 -1 ?
                     show_latent_code(sess)
