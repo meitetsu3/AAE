@@ -4,7 +4,6 @@ Created on Thu Nov 16 11:50:32 2017
 ref: https://github.com/Naresh1318/Adversarial_Autoencoder
 @author: mtodaka
 : ck operations on devices, meomry load inc
-: run 8 runs
 : stop when autoencoder loss increase on validation set
 : drop out
 : categorical descriminator
@@ -38,7 +37,7 @@ tb_log_step = 200  # tb logging step
 import tensorflow as tf
 config = tf.ConfigProto()
 config.log_device_placement = True
-config.gpu_options.per_process_gpu_memory_fraction = 0.40
+config.gpu_options.per_process_gpu_memory_fraction = 0.20 # can run up to 4 threads on main GPU, and 5 on others.
 
 dc_contour_res_x = 5 # x to the blanket resolution for descriminator contour plot
 myColor = ['black','orange', 'red', 'blue','gray','green','pink','cyan','lime','magenta']
@@ -84,6 +83,7 @@ Util Functions
 def variables_on_cpu(op):
     """
     Placing variables on CPU, partially to save GPU memory and utilize the main system RAM
+    Not sure if this is actually impacting any. Need to check with TB.
     """
     if op.type not in ['Variable', 'VariableV2', 'VarHandleOp']:
         return "/gpu:0"
