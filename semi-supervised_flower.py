@@ -17,7 +17,7 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  'lbl1000base_variableonGPU_2nd' #experiment title that goes in tensorflow folder name
+exptitle =  'lbl1000base' #experiment title that goes in tensorflow folder name
 mode = 1
 flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
@@ -37,7 +37,8 @@ tb_log_step = 200  # tb logging step
 import tensorflow as tf
 config = tf.ConfigProto()
 config.log_device_placement = True
-config.gpu_options.per_process_gpu_memory_fraction = 0.20 # can run up to 4 threads on main GPU, and 5 on others.
+config.allow_soft_placement=True
+config.gpu_options.per_process_gpu_memory_fraction = 0.2 # can run up to 4 threads on main GPU, and 5 on others.
 
 dc_contour_res_x = 5 # x to the blanket resolution for descriminator contour plot
 myColor = ['black','orange', 'red', 'blue','gray','green','pink','cyan','lime','magenta']
@@ -67,6 +68,7 @@ mnist = input_data.read_data_sets('./Data', one_hot=True)
 labels_fixedcopy = mnist.train.labels # keeping original label
 
 # Placeholders for input data and the targets
+
 x_input = tf.placeholder(dtype=tf.float32, shape=[None, input_dim], name='Input')
 real_distribution = tf.placeholder(dtype=tf.float32, shape=[None, z_dim], name='Real_distribution')
 unif_z = tf.placeholder(dtype=tf.float32, shape=[blanket_resolution*blanket_resolution, z_dim], name='Uniform_z')
@@ -86,9 +88,9 @@ def variables_on_cpu(op):
     Not sure if this is actually impacting any. Need to check with TB.
     """
     if op.type not in ['Variable', 'VariableV2', 'VarHandleOp']:
-        return "/gpu:0"
+        return '/gpu:0'
     else:
-        return "/cpu:0"
+        return '/cpu:0'
 
 def form_results():
     """
@@ -437,44 +439,41 @@ def tb_write(sess):
     writer.add_summary(sm, global_step=step)
 
 with tf.Session(config=config) as sess:
-    with tf.device(variables_on_cpu):
-        if mode==1: # Latent regulation
-            writer,saved_model_path = tb_init(sess)   
-            _,_,blanket = get_blanket(blanket_resolution)
-            n_batches = int(mnist.train.num_examples / ac_batch_size)
-            train_x, train_y = mnist.train.next_batch(n_label)
-            test_x, test_y = mnist.test.next_batch(n_label)
-            for i in range(n_epochs_ge):
-                print("------------------Epoch {}/{} ------------------".format(i, n_epochs_ge))
-                for b in tqdm(range(n_batches)):    
-                    #Discriminator
-                    batch_x, _ = mnist.train.next_batch(ac_batch_size)
-                    
-                    # random label as a selector to train z descriminator for flower graph 
-                    dc_real_lbl = np.eye(10)[np.array(np.random.randint(0,n_leaves, size=dc_real_batch_size)).reshape(-1)]
-                    dc_real_z = gaussian(dc_real_batch_size)
-    
-                    sess.run([discriminator_optimizer],feed_dict={x_input: batch_x, \
-                             real_distribution:dc_real_z,unif_z:blanket})
+    if mode==1: # Latent regulation
+        writer,saved_model_path = tb_init(sess)   
+        _,_,blanket = get_blanket(blanket_resolution)
+        n_batches = int(mnist.train.num_examples / ac_batch_size)
+        train_x, train_y = mnist.train.next_batch(n_label)
+        test_x, test_y = mnist.test.next_batch(n_label)
+        for i in range(n_epochs_ge):
+            print("------------------Epoch {}/{} ------------------".format(i, n_epochs_ge))
+            for b in tqdm(range(n_batches)):    
+                #Discriminator
+                batch_x, _ = mnist.train.next_batch(ac_batch_size)
+                #random label as a selector to train z descriminator for flower graph 
+                dc_real_lbl = np.eye(10)[np.array(np.random.randint(0,n_leaves, size=dc_real_batch_size)).reshape(-1)]
+                dc_real_z = gaussian(dc_real_batch_size)
+
+                sess.run([discriminator_optimizer],feed_dict={x_input: batch_x, \
+                         real_distribution:dc_real_z,unif_z:blanket})
+                #Generator - autoencoder, fooling descriminator, and y semi-supervised classification
+                train_xb, train_yb = next_batch(train_x,train_y,semi_sup_batch_size)
+                sess.run([generator_optimizer],feed_dict={x_input: batch_x,trainer_input:train_xb, trainer_lbl:train_yb})
+                if b % tb_log_step == 0:
+                    show_z_discriminator(sess) #shows others like 3, 7 -1 ?
+                    show_latent_code(sess)
+                    tb_write(sess)
+                step += 1
+        saver.save(sess, save_path=saved_model_path, global_step=step, write_meta_graph = True)
+        writer.close()
+    if mode==0: # showing the latest model result. InOut, true dist, discriminator, latent dist.
+        model_restore(saver,mode,model_folder)
+        show_inout(sess, op=decoder_output)         
+        real_z= gaussian(5000)
+        show_z_dist(real_z)
+        show_z_discriminator(sess)    
+        show_latent_code(sess)
         
-                    #Generator - autoencoder, fooling descriminator, and y semi-supervised classification
-                    train_xb, train_yb = next_batch(train_x,train_y,semi_sup_batch_size)
-                    sess.run([generator_optimizer],feed_dict={x_input: batch_x,trainer_input:train_xb, trainer_lbl:train_yb})
-                    if b % tb_log_step == 0:
-                        show_z_discriminator(sess) #shows others like 3, 7 -1 ?
-                        show_latent_code(sess)
-                        tb_write(sess)
-                    step += 1
-            saver.save(sess, save_path=saved_model_path, global_step=step, write_meta_graph = True)
-            writer.close()
-        if mode==0: # showing the latest model result. InOut, true dist, discriminator, latent dist.
-            model_restore(saver,mode,model_folder)
-            show_inout(sess, op=decoder_output)         
-            real_z= gaussian(5000)
-            show_z_dist(real_z)
-            show_z_discriminator(sess)    
-            show_latent_code(sess)
-            
             
         
         
