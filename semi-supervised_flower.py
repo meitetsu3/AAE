@@ -24,7 +24,7 @@ n_label = 500 # number of labels used in semi-supervised training
 bs_ae = 500  # autoencoder training batch size
 bs_ss = 32 # semi-supervised training batch size
 keep_prob = 0.95 # keep probability of drop out
-w_z_fooling = 0.001 # out of target weight in generator
+w_z_fooling = 0.01 # out of target weight in generator
 w_classfication = 0.001 #classification weight in generator
 w_y_reg = 0.001 # Y regulation or distance to vertex weight
 w_ae_loss = 1.0 # weight on autoencoding reconstuction loss
@@ -418,7 +418,7 @@ init = tf.global_variables_initializer()
 input_images = tf.reshape(x_auto, [-1, 28, 28, 1])
 generated_images = tf.reshape(decoder_output, [-1, 28, 28, 1])
 
-# Tensorboard visualizationdegit_v
+# Tensorboard visualizationdegit_veye
 tf.summary.scalar(name='Autoencoder_Loss', tensor=autoencoder_loss)
 tf.summary.scalar(name='Discriminator_Loss', tensor=dc_loss)
 tf.summary.scalar(name='Generator_Loss', tensor=generator_loss)
