@@ -210,7 +210,8 @@ def show_z_discriminator(sess,digit):
     X, Y = np.meshgrid(xlist, ylist)    
     
     with tf.variable_scope("Discriminator"):
-        desc_result = sess.run(tf.nn.sigmoid(discriminator_z(blanket,onehotdg, reuse=True)),feed_dict={is_training:False})
+        desc_result = sess.run(tf.nn.sigmoid(discriminator_z(blanket,onehotdg, reuse=True)),\
+                               feed_dict={is_training:False})
 
     Z = np.empty((br,br), dtype="float32")    
     for i in range(br):
@@ -301,14 +302,15 @@ def decoder(z,y, reuse=False):
     if reuse:
         tf.get_variable_scope().reuse_variables()
     last_layer = mlp_dec(x)
-    output = fully_connected(last_layer, input_dim, weights_initializer=he_init,scope='Sigmoid', activation_fn=tf.sigmoid)
+    output = fully_connected(last_layer, input_dim, weights_initializer=he_init,scope='Sigmoid',\
+                             activation_fn=tf.sigmoid)
     return output
 
 def discriminator_z(x,y, reuse=False):
     """encoder
     Discriminator that leanes to activate at true distribution and not for the others.
     :param x: tensor of shape [batch_size, z_dim]
-    :param y: predicted class, to pull the latent code of each class to the target, we need to feed this to uncorrelate 
+    :param y: predicted class. We need to feed this to uncorrelate 
     :param reuse: True -> Reuse the discriminator variables, False -> Create the variables
     :return: tensor of shape [batch_size, 1]. I think it's better to take sigmoid here.
     """
@@ -348,12 +350,14 @@ with tf.variable_scope('Encoder'):
     _,trainer_ylogits = encoder(x_train, reuse=True)
     
 with tf.variable_scope('Decoder'):
-    decoder_output = decoder(encoder_outputZ,tf.one_hot(tf.argmax(encoder_outputYlogits, dimension = 1), depth = n_leaves))
+    decoder_output = decoder(encoder_outputZ,tf.one_hot(tf.argmax(encoder_outputYlogits, dimension = 1), \
+                                                        depth = n_leaves))
     
 with tf.variable_scope('Discriminator'):
     d_real = discriminator_z(z_real, y_z_real)
     d_blanket = discriminator_z(z_blanket, y_z_blanket,reuse=True)
-    d_fake = discriminator_z(encoder_outputZ,tf.one_hot(tf.argmax(encoder_outputYlogits, dimension = 1), depth = n_leaves),reuse=True)
+    d_fake = discriminator_z(encoder_outputZ,tf.one_hot(tf.argmax(encoder_outputYlogits, dimension = 1), \
+                                                        depth = n_leaves),reuse=True)
     
 # loss 
 with tf.name_scope('Y_regulation'):
@@ -365,16 +369,20 @@ with tf.name_scope('Y_regulation'):
         minlogit = tf.reduce_min(encoder_outputYlogits)
         
 with tf.name_scope("dc_loss"):
-    dc_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(d_real), logits=d_real))
-    dc_loss_blanket = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(d_blanket), logits=d_blanket))
-    dc_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(d_fake), logits=d_fake))
+    dc_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
+            labels=tf.ones_like(d_real), logits=d_real))
+    dc_loss_blanket = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
+            labels=tf.zeros_like(d_blanket), logits=d_blanket))
+    dc_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
+            labels=tf.zeros_like(d_fake), logits=d_fake))
     dc_loss = dc_loss_blanket + dc_loss_real+dc_loss_fake
 
 with tf.name_scope("ge_loss"):
     autoencoder_loss = w_ae_loss*tf.reduce_mean(tf.square(x_auto - decoder_output))
-    classification_loss = w_classfication*tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=y_train,logits=trainer_ylogits, name="classification_loss"))
-    #Out of Target penaltyreal_lbl
-    z_fooling =w_z_fooling*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(d_fake), logits=d_fake))
+    classification_loss = w_classfication*tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(\
+            labels=y_train,logits=trainer_ylogits, name="classification_loss"))
+    z_fooling =w_z_fooling*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
+            labels=tf.ones_like(d_fake), logits=d_fake))
     generator_loss = autoencoder_loss+classification_loss+z_fooling+dist_to_vertex #not sure why it averages out
 
 # metrics
@@ -458,8 +466,8 @@ with tf.Session(config=config) as sess:
                 #Discriminator
                 auto_x, _ = mnist.train.next_batch(bs_ae)
                 #random label as a selector to train z descriminator for flower graph 
-                z_real_y = np.eye(10)[np.array(np.random.randint(0,n_leaves, size=bs_z_real)).reshape(-1)]
-                z_blanket_y = np.eye(10)[np.array(np.random.randint(0,n_leaves, size=res_blanket*res_blanket)).reshape(-1)]
+                z_real_y = np.eye(10)[np.random.randint(0,n_leaves, size=bs_z_real)]
+                z_blanket_y = np.eye(10)[np.random.randint(0,n_leaves, size=res_blanket*res_blanket)]
                 real_z = gaussian(bs_z_real)
 
                 sess.run([discriminator_optimizer],feed_dict={is_training:True,\
