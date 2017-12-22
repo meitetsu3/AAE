@@ -3,7 +3,8 @@
 Created on Thu Nov 16 11:50:32 2017
 ref: https://github.com/Naresh1318/Adversarial_Autoencoder
 @author: mtodaka
-: categorical descriminator
+: one combined discriminator with categorical
+: hold off Y regulation for a while with maxnorm?
 : discriminator vis and initial training
 : stop when autoencoder loss increase on validation set
 : separate? reconstruction, descriminator, generater, semi-supervised
@@ -16,7 +17,7 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  'lbl500_CatDisc' #experiment title that goes in tensorflow folder name
+exptitle =  'lbl500Rebase' #experiment title that goes in tensorflow folder name
 mode = 1
 flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
@@ -24,9 +25,9 @@ n_label = 500 # number of labels used in semi-supervised training
 bs_ae = 500  # autoencoder training batch size
 bs_ss = 32 # semi-supervised training batch size
 keep_prob = 0.95 # keep probability of drop out
-w_z_fooling = 0.01 # out of target weight in generator
-w_classfication = 0.001 #classification weight in generator
-w_y_reg = 0.001 # Y regulation or distance to vertex weight
+w_fooling = 0.01 # out of target weight in generator
+w_classfication = 0.01 #classification weight in generator
+w_y_reg = 0.01 # Y regulation or distance to vertex weight
 w_ae_loss = 1.0 # weight on autoencoding reconstuction loss
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
 n_epochs_ge = 10*n_leaves # mode 3, generator training epochs
@@ -35,7 +36,7 @@ import numpy as np
 res_blanket = 10*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
 bs_z_real = int(res_blanket*res_blanket/15) # descriminator training z real dist samplling batch size
 bs_ae_tb = 800  # x_inputs batch size for tb
-step_tb_log = 200  # tb logging step
+step_tb_log = 800  # tb logging step
 import tensorflow as tf
 config = tf.ConfigProto()
 config.gpu_options.per_process_gpu_memory_fraction = 0.2 # can run up to 4 threads on main GPU, and 5 on others.
@@ -74,9 +75,8 @@ x_train = tf.placeholder(dtype=tf.float32, shape=[None, input_dim], name='x_trai
 y_train = tf.placeholder(dtype=tf.float32, shape=[None,10],name = 'y_train')
 z_real = tf.placeholder(dtype=tf.float32, shape=[None, z_dim], name='z_real')
 z_blanket = tf.placeholder(dtype=tf.float32, shape=[res_blanket*res_blanket, z_dim], name='z_blanket')
-#y_real
-y_z_blanket = tf.placeholder(dtype=tf.float32, shape=[None,10],name = 'y_z_blanket')
-y_z_real = tf.placeholder(dtype=tf.float32, shape=[None,10],name = 'y_z_real')
+y_Zblanket = tf.placeholder(dtype=tf.float32, shape=[None,10],name = 'y_Zblanket')
+y_Zreal = tf.placeholder(dtype=tf.float32, shape=[None,10],name = 'y_Zreal')
 
 is_training = tf.placeholder(tf.bool, shape=(), name='is_training')
 he_init = tf.contrib.layers.variance_scaling_initializer(mode="FAN_AVG")
@@ -202,15 +202,19 @@ def show_z_discriminator(sess,digit):
     br = x_blanket_vis*res_blanket
     xlist, ylist, blanket = get_blanket(br)
     
-    onehotdg = np.eye(10,dtype="float32")[np.full([br*br],digit)]
+    if digit==-1:
+        #y_input = (np.random.uniform(-100,100,10*br*br)).astype('float32').reshape(br*br,10)
+        y_input = np.full([br*br,10],0.05,dtype="float32")
+    else:
+        y_input = np.eye(10,dtype="float32")[np.full([br*br],digit)]
     
     plt.rc('figure', figsize=(6, 5))
     plt.tight_layout()
     
     X, Y = np.meshgrid(xlist, ylist)    
     
-    with tf.variable_scope("Discriminator"):
-        desc_result = sess.run(tf.nn.sigmoid(discriminator_z(blanket,onehotdg, reuse=True)),\
+    with tf.variable_scope("DiscriminatorZ"):
+        desc_result = sess.run(tf.nn.sigmoid(discriminator_z(blanket,y_input, reuse=True)),\
                                feed_dict={is_training:False})
 
     Z = np.empty((br,br), dtype="float32")    
@@ -307,7 +311,7 @@ def decoder(z,y, reuse=False):
     return output
 
 def discriminator_z(x,y, reuse=False):
-    """encoder
+    """
     Discriminator that leanes to activate at true distribution and not for the others.
     :param x: tensor of shape [batch_size, z_dim]
     :param y: predicted class. We need to feed this to uncorrelate 
@@ -353,37 +357,38 @@ with tf.variable_scope('Decoder'):
     decoder_output = decoder(encoder_outputZ,tf.one_hot(tf.argmax(encoder_outputYlogits, dimension = 1), \
                                                         depth = n_leaves))
     
-with tf.variable_scope('Discriminator'):
-    d_real = discriminator_z(z_real, y_z_real)
-    d_blanket = discriminator_z(z_blanket, y_z_blanket,reuse=True)
-    d_fake = discriminator_z(encoder_outputZ,tf.one_hot(tf.argmax(encoder_outputYlogits, dimension = 1), \
+with tf.variable_scope('DiscriminatorZ'):
+    d_Zreal = discriminator_z(z_real, y_Zreal)
+    d_Zblanket = discriminator_z(z_blanket, y_Zblanket,reuse=True)
+    d_Zfake = discriminator_z(encoder_outputZ,tf.one_hot(tf.argmax(encoder_outputYlogits, dimension = 1), \
                                                         depth = n_leaves),reuse=True)
     
 # loss 
 with tf.name_scope('Y_regulation'):
     with tf.name_scope('unsupervised_simplex_distToVertex'):
         Yonehot = tf.one_hot(tf.argmax(encoder_outputYlogits, dimension = 1), depth = n_leaves)
-        Ysoftmax = tf.nn.softmax(encoder_outputYlogits)
+        #Ysoftmax = tf.nn.softmax(encoder_outputYlogits)
         dist_to_vertex = w_y_reg*tf.reduce_mean(tf.reduce_sum(tf.square( Yonehot- encoder_outputYlogits),axis=1))
-        maxlogit = tf.reduce_max(encoder_outputYlogits)
-        minlogit = tf.reduce_min(encoder_outputYlogits)
+        maxlogit = tf.reduce_mean(tf.reduce_max(encoder_outputYlogits,axis=1))
+        minlogit = tf.reduce_mean(tf.reduce_min(encoder_outputYlogits,axis=1))
+        sumlogit = tf.reduce_mean(tf.reduce_sum(encoder_outputYlogits,axis = 1))
         
 with tf.name_scope("dc_loss"):
     dc_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
-            labels=tf.ones_like(d_real), logits=d_real))
+            labels=tf.ones_like(d_Zreal), logits=d_Zreal))
     dc_loss_blanket = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
-            labels=tf.zeros_like(d_blanket), logits=d_blanket))
+            labels=tf.zeros_like(d_Zblanket), logits=d_Zblanket))
     dc_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
-            labels=tf.zeros_like(d_fake), logits=d_fake))
+            labels=tf.zeros_like(d_Zfake), logits=d_Zfake))
     dc_loss = dc_loss_blanket + dc_loss_real+dc_loss_fake
 
 with tf.name_scope("ge_loss"):
     autoencoder_loss = w_ae_loss*tf.reduce_mean(tf.square(x_auto - decoder_output))
     classification_loss = w_classfication*tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(\
             labels=y_train,logits=trainer_ylogits, name="classification_loss"))
-    z_fooling =w_z_fooling*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
-            labels=tf.ones_like(d_fake), logits=d_fake))
-    generator_loss = autoencoder_loss+classification_loss+z_fooling+dist_to_vertex #not sure why it averages out
+    d_Zfooling =w_fooling*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
+            labels=tf.ones_like(d_Zfake), logits=d_Zfake))
+    generator_loss = autoencoder_loss+classification_loss+d_Zfooling+dist_to_vertex
 
 # metrics
 with tf.name_scope('accuracy'):
@@ -396,7 +401,7 @@ with tf.name_scope('accuracy'):
 
 #optimizer
 all_variables = tf.trainable_variables()
-dc_var = [var for var in all_variables if 'Discriminator/' in var.name]
+dc_var = [var for var in all_variables if 'DiscriminatorZ/' in var.name]
 ae_var = [var for var in all_variables if ('Encoder/' in var.name or 'Decoder/' in var.name)]
 a_var = [var for var in all_variables if ('Encoder/' in var.name)]
 
@@ -422,13 +427,15 @@ generated_images = tf.reshape(decoder_output, [-1, 28, 28, 1])
 tf.summary.scalar(name='Autoencoder_Loss', tensor=autoencoder_loss)
 tf.summary.scalar(name='Discriminator_Loss', tensor=dc_loss)
 tf.summary.scalar(name='Generator_Loss', tensor=generator_loss)
-tf.summary.scalar(name='z_fooling', tensor=z_fooling)
+tf.summary.scalar(name='d_Zfooling', tensor=d_Zfooling)
 tf.summary.scalar(name='Classification_Loss', tensor=classification_loss)
 tf.summary.scalar(name='Accuracy', tensor=accuracy)
 tf.summary.scalar(name='Training_Accuracy', tensor=t_accuracy)
 tf.summary.scalar(name='Distance_to_Vertex', tensor=dist_to_vertex)
 tf.summary.scalar(name='maxlogit', tensor=maxlogit)
 tf.summary.scalar(name='minlogit', tensor=minlogit)
+tf.summary.scalar(name='sumlogit', tensor=sumlogit)
+
 summary_op = tf.summary.merge_all()
 
 # Creating saver and get ready
@@ -450,14 +457,14 @@ def tb_write(sess):
     #test_x, test_y = mnist.train.next_batch(tb_batch_size) # debuging. want to see the training stats
     # use the priviousely generated data for others
     sm = sess.run(summary_op,feed_dict={is_training:False, x_auto:test_x, y_test:test_y, \
-            x_train:alltrain_x, y_train:alltrain_y, z_real:real_z,y_z_blanket:z_blanket_y,y_z_real:z_real_y\
-            ,z_blanket:blanket})
+            x_train:alltrain_x, y_train:alltrain_y, z_real:real_z,y_Zblanket:Zblanket_y,y_Zreal:Zreal_y\
+            ,z_blanket:blanket_z})
     writer.add_summary(sm, global_step=step)
 
 with tf.Session(config=config) as sess:
     if mode==1: # Latent regulation
         writer,saved_model_path = tb_init(sess)   
-        _,_,blanket = get_blanket(res_blanket)
+        _,_,blanket_z = get_blanket(res_blanket)
         n_batches = int(mnist.train.num_examples / bs_ae)
         alltrain_x, alltrain_y = mnist.train.next_batch(n_label)
         for i in range(n_epochs_ge):
@@ -465,21 +472,22 @@ with tf.Session(config=config) as sess:
             for b in tqdm(range(n_batches)):    
                 #Discriminator
                 auto_x, _ = mnist.train.next_batch(bs_ae)
-                #random label as a selector to train z descriminator for flower graph 
-                z_real_y = np.eye(10)[np.random.randint(0,n_leaves, size=bs_z_real)]
-                z_blanket_y = np.eye(10)[np.random.randint(0,n_leaves, size=res_blanket*res_blanket)]
+                Zreal_y = np.eye(10)[np.random.randint(0,n_leaves, size=bs_z_real)]
+                Zblanket_y = np.eye(10)[np.random.randint(0,n_leaves, size=res_blanket*res_blanket)]
                 real_z = gaussian(bs_z_real)
 
                 sess.run([discriminator_optimizer],feed_dict={is_training:True,\
-                        x_auto:auto_x, y_z_real:z_real_y, y_z_blanket:z_blanket_y,\
-                        z_real:real_z, z_blanket:blanket})
+                        x_auto:auto_x, y_Zreal:Zreal_y, y_Zblanket:Zblanket_y,\
+                        z_real:real_z, z_blanket:blanket_z})
     
                 #Generator - autoencoder, fooling descriminator, and y semi-supervised classification
                 train_xb, train_yb = next_batch(alltrain_x,alltrain_y,bs_ss)
                 sess.run([generator_optimizer],feed_dict={is_training:True,\
                          x_auto:auto_x, x_train:train_xb, y_train:train_yb})
                 if b % step_tb_log == 0:
-                    show_z_discriminator(sess,3) #shows others like 3, 7 -1 ?
+                    show_z_discriminator(sess,1)  
+                    show_z_discriminator(sess,4)  # [0,0,0,0,1,0,0,0,0,0]
+                    show_z_discriminator(sess,-1) 
                     show_latent_code(sess)
                     tb_write(sess)
                 step += 1
@@ -491,7 +499,9 @@ with tf.Session(config=config) as sess:
         real_z= gaussian(5000)
         show_z_dist(real_z)
         show_z_discriminator(sess,1)  
-        show_z_discriminator(sess,5)   
+        show_z_discriminator(sess,4)  # [0,0,0,0,1,0,0,0,0,0]
+        show_z_discriminator(sess,-1) 
+        # random y in [-100,100]^10 space..should not activate if discriminator is selective on discreate y 
         show_latent_code(sess)
         
             
