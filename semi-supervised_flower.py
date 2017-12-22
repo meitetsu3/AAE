@@ -76,7 +76,8 @@ y_train = tf.placeholder(dtype=tf.float32, shape=[None,10],name = 'y_train')
 z_real = tf.placeholder(dtype=tf.float32, shape=[None, z_dim], name='z_real')
 z_blanket = tf.placeholder(dtype=tf.float32, shape=[res_blanket*res_blanket, z_dim], name='z_blanket')
 y_Zblanket = tf.placeholder(dtype=tf.float32, shape=[None,10],name = 'y_Zblanket')
-y_Zreal = tf.placeholder(dtype=tf.float32, shape=[None,10],name = 'y_Zreal')
+y_ZYreal = tf.placeholder(dtype=tf.float32, shape=[None,10],name = 'y_ZYreal')
+y_blanket = tf.placeholder(dtype=tf.float32, shape=[None,10],name = 'y_blanket') # not integers
 
 is_training = tf.placeholder(tf.bool, shape=(), name='is_training')
 he_init = tf.contrib.layers.variance_scaling_initializer(mode="FAN_AVG")
@@ -324,6 +325,20 @@ def discriminator_z(x,y, reuse=False):
     output = fully_connected(last_layer, 1, weights_initializer=he_init, scope='None',activation_fn=None)
     return output
 
+def discriminator_y(y, reuse=False):
+    """
+    Discriminator that leanes to activate at true distribution and not for the others.
+    :param y: predicted class.
+    :param reuse: True -> Reuse the discriminator variables, False -> Create the variables
+    :return: tensor of shape [batch_size, 1]. I think it's better to take sigmoid here.
+    """
+    if reuse:
+        tf.get_variable_scope().reuse_variables()
+    last_layer = mlp_dec(y)
+    output = fully_connected(last_layer, 1, weights_initializer=he_init, scope='None',activation_fn=None)
+    return output
+
+
 def gaussian_mixture(z, num_leaves, selector):
     """
     selector to distribute cluster face
@@ -358,10 +373,15 @@ with tf.variable_scope('Decoder'):
                                                         depth = n_leaves))
     
 with tf.variable_scope('DiscriminatorZ'):
-    d_Zreal = discriminator_z(z_real, y_Zreal)
+    d_Zreal = discriminator_z(z_real, y_ZYreal)
     d_Zblanket = discriminator_z(z_blanket, y_Zblanket,reuse=True)
     d_Zfake = discriminator_z(encoder_outputZ,tf.one_hot(tf.argmax(encoder_outputYlogits, dimension = 1), \
                                                         depth = n_leaves),reuse=True)
+
+with tf.variable_scope('DiscriminatorY'):
+    d_Yreal = discriminator_y(y_ZYreal)
+    d_Yblanket = discriminator_y(y_blanket,reuse=True)
+    d_Yfake = discriminator_y(encoder_outputYlogits,reuse=True)
     
 # loss 
 with tf.name_scope('Y_regulation'):
@@ -374,13 +394,22 @@ with tf.name_scope('Y_regulation'):
         sumlogit = tf.reduce_mean(tf.reduce_sum(encoder_outputYlogits,axis = 1))
         
 with tf.name_scope("dc_loss"):
-    dc_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
+    DCloss_Zreal = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
             labels=tf.ones_like(d_Zreal), logits=d_Zreal))
-    dc_loss_blanket = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
+    DCloss_Zblanket = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
             labels=tf.zeros_like(d_Zblanket), logits=d_Zblanket))
-    dc_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
+    DCloss_Zfake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
             labels=tf.zeros_like(d_Zfake), logits=d_Zfake))
-    dc_loss = dc_loss_blanket + dc_loss_real+dc_loss_fake
+    
+    DCloss_Yreal = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
+            labels=tf.ones_like(d_Yreal), logits=d_Yreal))
+    DCloss_Yblanket = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
+            labels=tf.zeros_like(d_Yblanket), logits=d_Yblanket))
+    DCloss_Yfake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
+            labels=tf.zeros_like(d_Yfake), logits=d_Yfake))
+    
+    dc_Zloss = DCloss_Zblanket + DCloss_Zreal+DCloss_Zfake
+    dc_Yloss = DCloss_Yblanket + DCloss_Yreal+DCloss_Yfake
 
 with tf.name_scope("ge_loss"):
     autoencoder_loss = w_ae_loss*tf.reduce_mean(tf.square(x_auto - decoder_output))
@@ -409,7 +438,7 @@ with tf.name_scope("AE_optimizer"):
     autoencoder_optimizer = tf.train.AdamOptimizer().minimize(autoencoder_loss)
 
 with tf.name_scope("DC_optimizer"):
-    discriminator_optimizer = tf.train.AdamOptimizer().minimize(dc_loss, var_list=dc_var)
+    discriminator_optimizer = tf.train.AdamOptimizer().minimize(dc_Zloss, var_list=dc_var)
 
 with tf.name_scope("Y_optimizer"):
     Y_optimizer = tf.train.AdamOptimizer().minimize(dist_to_vertex, var_list=a_var)    
@@ -425,7 +454,7 @@ generated_images = tf.reshape(decoder_output, [-1, 28, 28, 1])
 
 # Tensorboard visualizationdegit_veye
 tf.summary.scalar(name='Autoencoder_Loss', tensor=autoencoder_loss)
-tf.summary.scalar(name='Discriminator_Loss', tensor=dc_loss)
+tf.summary.scalar(name='dc_Zloss', tensor=dc_Zloss)
 tf.summary.scalar(name='Generator_Loss', tensor=generator_loss)
 tf.summary.scalar(name='d_Zfooling', tensor=d_Zfooling)
 tf.summary.scalar(name='Classification_Loss', tensor=classification_loss)
@@ -457,7 +486,7 @@ def tb_write(sess):
     #test_x, test_y = mnist.train.next_batch(tb_batch_size) # debuging. want to see the training stats
     # use the priviousely generated data for others
     sm = sess.run(summary_op,feed_dict={is_training:False, x_auto:test_x, y_test:test_y, \
-            x_train:alltrain_x, y_train:alltrain_y, z_real:real_z,y_Zblanket:Zblanket_y,y_Zreal:Zreal_y\
+            x_train:alltrain_x, y_train:alltrain_y, z_real:real_z,y_Zblanket:Zblanket_y,y_ZYreal:ZYreal_y\
             ,z_blanket:blanket_z})
     writer.add_summary(sm, global_step=step)
 
@@ -472,12 +501,12 @@ with tf.Session(config=config) as sess:
             for b in tqdm(range(n_batches)):    
                 #Discriminator
                 auto_x, _ = mnist.train.next_batch(bs_ae)
-                Zreal_y = np.eye(10)[np.random.randint(0,n_leaves, size=bs_z_real)]
+                ZYreal_y = np.eye(10)[np.random.randint(0,n_leaves, size=bs_z_real)]
                 Zblanket_y = np.eye(10)[np.random.randint(0,n_leaves, size=res_blanket*res_blanket)]
                 real_z = gaussian(bs_z_real)
-
+                
                 sess.run([discriminator_optimizer],feed_dict={is_training:True,\
-                        x_auto:auto_x, y_Zreal:Zreal_y, y_Zblanket:Zblanket_y,\
+                        x_auto:auto_x, y_ZYreal:ZYreal_y, y_Zblanket:Zblanket_y,\
                         z_real:real_z, z_blanket:blanket_z})
     
                 #Generator - autoencoder, fooling descriminator, and y semi-supervised classification
