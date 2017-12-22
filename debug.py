@@ -5,17 +5,13 @@ import matplotlib.pyplot as plt
 from tensorflow.examples.tutorials.mnist import input_data
 import random
 
-def clulster_face(num_l, sel):
-    shift = 1.7
-    r = (2.0 * np.pi / float(num_l)) * sel
-    new_x = shift * np.cos(r)
-    new_y = shift * np.sin(r)
-    return np.transpose(np.array([new_x, new_y])).reshape((len(sel),2))
+br = 100
+a = np.full([br*br],1)
 
-selector = np.array([0,1])
+np.eye(10,dtype="float32")[a]
 
-face = clulster_face(10,selector)
+np.eye(10)[np.random.randint(0,10, size=20)]
 
-r = 2.0 * np.pi / float(10)*selector
-cos(r)
-        
+
+onehotdg = np.eye(10)[np.full([br*br],digit).reshape(-1)]
+    
