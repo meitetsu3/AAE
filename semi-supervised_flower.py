@@ -17,19 +17,20 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  'lbl400Base' #experiment title that goes in tensorflow folder name
+exptitle =  'lbl400Opt' #experiment title that goes in tensorflow folder name
 mode = 1
 flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
 n_label = 400 # number of labels used in semi-supervised training
 bs_ae = 500  # autoencoder training batch size
 bs_ss = 32 # semi-supervised training batch size
-keep_prob = 0.95 # keep probability of drop out
+keep_prob = 0.99 # keep probability of drop out
 w_zfool = 0.01 # weight on z fooling
 w_yfool = 0.01 # weight on y fooling
 w_classfication = 0.01 #classification weight in generator
 w_y_reg = 0.01 # Y regulation or distance to vertex weight
 w_ae_loss = 1.0 # weight on autoencoding reconstuction loss
+jit_std = 0.1 # Y real jittering stdev
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
 n_epochs_ge = 10*n_leaves # mode 3, generator training epochs
 
@@ -192,8 +193,11 @@ def show_latent_code(sess):
     plt.close()
     
     test_accuracy = 100.0*np.mean(np.equal(train_lbli, train_yi))
+    
+    np.set_printoptions(precision=1)
     print("Test Accuracy:{}%".format(test_accuracy))
-    print(train_ys[0:10])
+    print("Y logits of top 5 test images :")
+    print(train_ys[0:4])
     
 def show_z_discriminator(sess,digit):
     """
@@ -344,7 +348,7 @@ def discriminator_y(y, reuse=False):
 
 def gaussian_mixture(z, num_leaves, selector):
     """
-    selector to distribute cluster face
+    selector to distribute cluster faceFalse
     from the cluseter face, place z, which is 2D latent distribution
     """
     def clulster_face(num_l, sel):
@@ -511,11 +515,12 @@ with tf.Session(config=config) as sess:
                 #Discriminator
                 auto_x, _ = mnist.train.next_batch(bs_ae)
                 Zreal_y = np.eye(10)[np.random.randint(0,n_leaves, size=bs_z_real)]
-                real_y = np.eye(10)[np.random.randint(0,n_leaves, size=bs_z_real)]+np.random.normal(0.0,0.1,(bs_z_real,10))
+                real_y = np.eye(10)[np.random.randint(0,n_leaves, size=bs_z_real)]+np.random.normal(0.0,jit_std,(bs_z_real,10))
                 Zblanket_y = np.eye(10)[np.random.randint(0,n_leaves, size=res_blanket*res_blanket)]
                 real_z = gaussian(bs_z_real)
+          
                 blanket_y = (np.random.uniform(-3,3,10*res_blanket*res_blanket)).astype('float32').reshape(res_blanket*res_blanket,10)
-                
+
                 sess.run([discriminator_optimizer],feed_dict={is_training:True,\
                         x_auto:auto_x, y_Zreal:Zreal_y, y_Zblanket:Zblanket_y,y_real:real_y,\
                         z_real:real_z, z_blanket:blanket_z, y_blanket:blanket_y})
