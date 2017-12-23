@@ -17,21 +17,21 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  'lbl500Rebase_do90' #experiment title that goes in tensorflow folder name
+exptitle =  'lbl500Rebase_do95_jit005' #experiment title that goes in tensorflow folder name
 mode = 1
 flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
 n_label = 500 # number of labels used in semi-supervised training
 bs_ae = 500  # autoencoder training batch size
 bs_ss = 32 # semi-supervised training batch size
-keep_prob = 0.90 # keep probability of drop out
+keep_prob = 0.95 # keep probability of drop out
 w_zfool = 0.01 # weight on z fooling
 w_yfool = 0.01 # weight on y fooling
 w_classfication = 0.01 #classification weight in generator
 w_y_reg = 0.01 # Y regulation or distance to vertex weight
 w_ae_loss = 1.0 # weight on autoencoding reconstuction loss
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
-n_epochs_ge = 10*n_leaves # mode 3, generator training epochs
+n_epochs_ge = 20*n_leaves # mode 3, generator training epochs
 
 import numpy as np
 res_blanket = 10*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
@@ -511,7 +511,7 @@ with tf.Session(config=config) as sess:
                 #Discriminator
                 auto_x, _ = mnist.train.next_batch(bs_ae)
                 Zreal_y = np.eye(10)[np.random.randint(0,n_leaves, size=bs_z_real)]
-                real_y = np.eye(10)[np.random.randint(0,n_leaves, size=bs_z_real)]+np.random.normal(0.0,0.3,(bs_z_real,10))
+                real_y = np.eye(10)[np.random.randint(0,n_leaves, size=bs_z_real)]+np.random.normal(0.0,0.1,(bs_z_real,10))
                 Zblanket_y = np.eye(10)[np.random.randint(0,n_leaves, size=res_blanket*res_blanket)]
                 real_z = gaussian(bs_z_real)
                 blanket_y = (np.random.uniform(-3,3,10*res_blanket*res_blanket)).astype('float32').reshape(res_blanket*res_blanket,10)
