@@ -17,7 +17,7 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  'lbl200_pt5' #experiment title that goes in tensorflow folder name
+exptitle =  'lbl200Opt' #experiment title that goes in tensorflow folder name
 mode = 1
 flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
@@ -30,10 +30,10 @@ w_yfool = 0.01 # weight on y fooling
 w_classfication = 0.01 #classification weight in generator
 w_y_reg = 0.01 # Y regulation or distance to vertex weight
 w_ae_loss = 1.0 # weight on autoencoding reconstuction loss
-jit_std = 0.1 # Y real jittering stdev
+jit_std = 0.05 # Y real jittering stdev
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
-n_epochs_ge = 10*n_leaves # mode 3, generator training epochs
-n_pretrain = 5 # pre supervised training step
+n_epochs_ge = 5*n_leaves # mode 3, generator training epochs
+n_pretrain = 0 # pre supervised training step
 
 import numpy as np
 res_blanket = 10*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
@@ -533,13 +533,14 @@ with tf.Session(config=config) as sess:
                 real_z = gaussian(bs_z_real)
           
                 blanket_y = (np.random.uniform(-3,3,10*res_blanket*res_blanket)).astype('float32').reshape(res_blanket*res_blanket,10)
-
+      
                 sess.run([discriminator_optimizer],feed_dict={is_training:True,\
                         x_auto:auto_x, y_Zreal:Zreal_y, y_Zblanket:Zblanket_y,y_real:real_y,\
                         z_real:real_z, z_blanket:blanket_z, y_blanket:blanket_y})
     
                 #Generator - autoencoder, fooling descriminator, and y semi-supervised classification
                 train_xb, train_yb = next_batch(alltrain_x,alltrain_y,bs_ss)
+                
                 sess.run([generator_optimizer],feed_dict={is_training:True,\
                          x_auto:auto_x, x_train:train_xb, y_train:train_yb})
                 if b % step_tb_log == 0:
