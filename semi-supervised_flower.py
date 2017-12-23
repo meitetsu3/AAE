@@ -17,11 +17,11 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  'lbl400Opt' #experiment title that goes in tensorflow folder name
+exptitle =  'lbl300Opt' #experiment title that goes in tensorflow folder name
 mode = 1
 flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
-n_label = 400 # number of labels used in semi-supervised training
+n_label = 300 # number of labels used in semi-supervised training
 bs_ae = 500  # autoencoder training batch size
 bs_ss = 32 # semi-supervised training batch size
 keep_prob = 0.99 # keep probability of drop out
