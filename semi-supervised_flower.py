@@ -17,16 +17,16 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  'lbl500Rebase' #experiment title that goes in tensorflow folder name
+exptitle =  'lbl500Rebase_do90' #experiment title that goes in tensorflow folder name
 mode = 1
 flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
 n_label = 500 # number of labels used in semi-supervised training
 bs_ae = 500  # autoencoder training batch size
 bs_ss = 32 # semi-supervised training batch size
-keep_prob = 0.95 # keep probability of drop out
-w_zfool = 0.1 # weight on z fooling
-w_yfool = 0.00001 # weight on y fooling
+keep_prob = 0.90 # keep probability of drop out
+w_zfool = 0.01 # weight on z fooling
+w_yfool = 0.01 # weight on y fooling
 w_classfication = 0.01 #classification weight in generator
 w_y_reg = 0.01 # Y regulation or distance to vertex weight
 w_ae_loss = 1.0 # weight on autoencoding reconstuction loss
