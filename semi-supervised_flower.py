@@ -17,11 +17,11 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  'lbl300Opt' #experiment title that goes in tensorflow folder name
+exptitle =  'lbl200_pt5' #experiment title that goes in tensorflow folder name
 mode = 1
 flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
-n_label = 300 # number of labels used in semi-supervised training
+n_label = 200 # number of labels used in semi-supervised training
 bs_ae = 500  # autoencoder training batch size
 bs_ss = 32 # semi-supervised training batch size
 keep_prob = 0.99 # keep probability of drop out
@@ -33,6 +33,7 @@ w_ae_loss = 1.0 # weight on autoencoding reconstuction loss
 jit_std = 0.1 # Y real jittering stdev
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
 n_epochs_ge = 10*n_leaves # mode 3, generator training epochs
+n_pretrain = 5 # pre supervised training step
 
 import numpy as np
 res_blanket = 10*int(np.sqrt(n_leaves)) # blanket resoliution for descriminator or its contour plot
@@ -428,6 +429,7 @@ with tf.name_scope("ge_loss"):
     d_Yfooling =w_yfool*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
             labels=tf.ones_like(d_Yfake), logits=d_Yfake))
     generator_loss = autoencoder_loss+classification_loss+d_Zfooling+d_Yfooling
+    pre_generator_loss = autoencoder_loss+classification_loss
 
 # metrics
 with tf.name_scope('accuracy'):
@@ -455,6 +457,10 @@ with tf.name_scope("Y_optimizer"):
     
 with tf.name_scope("GE_optimizer"):
     generator_optimizer = tf.train.AdamOptimizer().minimize(generator_loss, var_list=ae_var)
+
+with tf.name_scope("PreGE_optimizer"):
+    pre_generator_optimizer = tf.train.AdamOptimizer().minimize(pre_generator_loss, var_list=ae_var)
+
 
 init = tf.global_variables_initializer()
 
@@ -509,6 +515,13 @@ with tf.Session(config=config) as sess:
         _,_,blanket_z = get_blanket(res_blanket)
         n_batches = int(mnist.train.num_examples / bs_ae)
         alltrain_x, alltrain_y = mnist.train.next_batch(n_label)
+        for i in range(n_pretrain):
+            print("-------------EA, super pretraining{}/{} ---------".format(i, n_pretrain))  
+            auto_x, _ = mnist.train.next_batch(bs_ae)                #Generator - autoencoder, fooling descriminator, and y semi-supervised classification
+            train_xb, train_yb = next_batch(alltrain_x,alltrain_y,bs_ss)
+            sess.run([pre_generator_optimizer],feed_dict={is_training:True,\
+                         x_auto:auto_x, x_train:train_xb, y_train:train_yb})            
+            show_latent_code(sess)
         for i in range(n_epochs_ge):
             print("------------------Epoch {}/{} ------------------".format(i, n_epochs_ge))
             for b in tqdm(range(n_batches)):    
