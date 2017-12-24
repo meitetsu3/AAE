@@ -17,18 +17,18 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  'lbl100_bsss8' #experiment title that goes in tensorflow folder name
+exptitle =  'lbl100base1' #experiment title that goes in tensorflow folder name
 mode = 1
 flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
 n_label = 100 # number of labels used in semi-supervised training
 bs_ae = 2000  # autoencoder training batch size
-bs_ss = 8 # semi-supervised training batch size
+bs_ss = 16 # semi-supervised training batch size
 keep_prob = 1.00 # keep probability of drop out
 w_zfool = 0.01 # weight on z fooling
 w_yfool = 0.01 # weight on y fooling
 w_classfication = 0.01 #classification weight in generator
-w_VtxReg = 0.001 # Training distance to vertex weight
+w_VtxReg = 0.01 # Training distance to vertex weight
 w_ae_loss = 1.00 # weight on autoencoding reconstuction loss
 jit_std = 0.05 # Y real jittering stdev
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
