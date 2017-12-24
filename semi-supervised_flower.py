@@ -17,9 +17,9 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  'lbl100_trainVtxpush0001' #experiment title that goes in tensorflow folder name
-mode = 0
-flg_graph = True # showing graphs or not during the training. Showing graphs significantly slows down the training.
+exptitle =  'lbl100_cl_dtvtx' #experiment title that goes in tensorflow folder name
+mode = 1
+flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
 n_label = 100 # number of labels used in semi-supervised training
 bs_ae = 500  # autoencoder training batch size
@@ -28,7 +28,7 @@ keep_prob = 1.00 # keep probability of drop out
 w_zfool = 0.01 # weight on z fooling
 w_yfool = 0.01 # weight on y fooling
 w_classfication = 0.01 #classification weight in generator
-w_VtxReg = 0.001 # Training distance to vertex weight
+w_VtxReg = 0.01 # Training distance to vertex weight
 w_ae_loss = 1.00 # weight on autoencoding reconstuction loss
 jit_std = 0.05 # Y real jittering stdev
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
@@ -395,9 +395,7 @@ with tf.variable_scope('DiscriminatorY'):
 with tf.name_scope('Y_regulation'):
     with tf.name_scope('unsupervised_simplex_distToVertex'):
         Yonehot = tf.one_hot(tf.argmax(encoder_outputYlogits, dimension = 1), depth = n_leaves)
-        #Ysoftmax = tf.nn.softmax(encoder_outputYlogits)
-        Yonehot_t = tf.one_hot(tf.argmax(trainer_ylogits, dimension = 1), depth = n_leaves)
-        dist_to_vertexT = w_VtxReg*tf.reduce_mean(tf.reduce_sum(tf.square( Yonehot_t- trainer_ylogits),axis=1))
+        dist_to_vertexT = w_VtxReg*tf.reduce_mean(tf.reduce_sum(tf.square( y_train- trainer_ylogits),axis=1))
         dist_to_vertex = tf.reduce_mean(tf.reduce_sum(tf.square( Yonehot- encoder_outputYlogits),axis=1))
         maxlogit = tf.reduce_mean(tf.reduce_max(encoder_outputYlogits,axis=1))
         minlogit = tf.reduce_mean(tf.reduce_min(encoder_outputYlogits,axis=1))
@@ -430,8 +428,7 @@ with tf.name_scope("ge_loss"):
             labels=tf.ones_like(d_Zfake), logits=d_Zfake))
     d_Yfooling =w_yfool*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
             labels=tf.ones_like(d_Yfake), logits=d_Yfake))
-    generator_loss = autoencoder_loss+classification_loss+d_Zfooling+d_Yfooling+dist_to_vertexT
-    pre_generator_loss = autoencoder_loss+classification_loss
+    generator_loss = autoencoder_loss+d_Zfooling+d_Yfooling+classification_loss+dist_to_vertexT
 
 # metrics
 with tf.name_scope('accuracy'):
@@ -459,9 +456,6 @@ with tf.name_scope("Y_optimizer"):
     
 with tf.name_scope("GE_optimizer"):
     generator_optimizer = tf.train.AdamOptimizer().minimize(generator_loss, var_list=ae_var)
-
-with tf.name_scope("PreGE_optimizer"):
-    pre_generator_optimizer = tf.train.AdamOptimizer().minimize(pre_generator_loss, var_list=ae_var)
 
 
 init = tf.global_variables_initializer()
@@ -518,13 +512,6 @@ with tf.Session(config=config) as sess:
         _,_,blanket_z = get_blanket(res_blanket)
         n_batches = int(mnist.train.num_examples / bs_ae)
         alltrain_x, alltrain_y = mnist.train.next_batch(n_label)
-        for i in range(n_pretrain):
-            print("-------------EA, super pretraining{}/{} ---------".format(i, n_pretrain))  
-            auto_x, _ = mnist.train.next_batch(bs_ae)                #Generator - autoencoder, fooling descriminator, and y semi-supervised classification
-            train_xb, train_yb = next_batch(alltrain_x,alltrain_y,bs_ss)
-            sess.run([pre_generator_optimizer],feed_dict={is_training:True,\
-                         x_auto:auto_x, x_train:train_xb, y_train:train_yb})            
-            show_latent_code(sess)
         for i in range(n_epochs_ge):
             print("------------------Epoch {}/{} ------------------".format(i, n_epochs_ge))
             for b in tqdm(range(n_batches)):    
