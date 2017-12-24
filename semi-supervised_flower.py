@@ -17,19 +17,19 @@ modes:
 1: Latent regulation. train generator to fool Descriminator with reconstruction constraint.
 0: Showing latest model results. InOut, true dist, discriminator, latent dist.
 """
-exptitle =  'lbl200Opt' #experiment title that goes in tensorflow folder name
-mode = 1
-flg_graph = False # showing graphs or not during the training. Showing graphs significantly slows down the training.
+exptitle =  'lbl100_trainVtxpush0001' #experiment title that goes in tensorflow folder name
+mode = 0
+flg_graph = True # showing graphs or not during the training. Showing graphs significantly slows down the training.
 model_folder = '' # name of the model to be restored. white space means most recent.
-n_label = 200 # number of labels used in semi-supervised training
+n_label = 100 # number of labels used in semi-supervised training
 bs_ae = 500  # autoencoder training batch size
 bs_ss = 32 # semi-supervised training batch size
-keep_prob = 0.99 # keep probability of drop out
+keep_prob = 1.00 # keep probability of drop out
 w_zfool = 0.01 # weight on z fooling
 w_yfool = 0.01 # weight on y fooling
 w_classfication = 0.01 #classification weight in generator
-w_y_reg = 0.01 # Y regulation or distance to vertex weight
-w_ae_loss = 1.0 # weight on autoencoding reconstuction loss
+w_VtxReg = 0.001 # Training distance to vertex weight
+w_ae_loss = 1.00 # weight on autoencoding reconstuction loss
 jit_std = 0.05 # Y real jittering stdev
 n_leaves = 10 # number of leaves in the mixed 2D Gaussian
 n_epochs_ge = 5*n_leaves # mode 3, generator training epochs
@@ -396,7 +396,9 @@ with tf.name_scope('Y_regulation'):
     with tf.name_scope('unsupervised_simplex_distToVertex'):
         Yonehot = tf.one_hot(tf.argmax(encoder_outputYlogits, dimension = 1), depth = n_leaves)
         #Ysoftmax = tf.nn.softmax(encoder_outputYlogits)
-        dist_to_vertex = w_y_reg*tf.reduce_mean(tf.reduce_sum(tf.square( Yonehot- encoder_outputYlogits),axis=1))
+        Yonehot_t = tf.one_hot(tf.argmax(trainer_ylogits, dimension = 1), depth = n_leaves)
+        dist_to_vertexT = w_VtxReg*tf.reduce_mean(tf.reduce_sum(tf.square( Yonehot_t- trainer_ylogits),axis=1))
+        dist_to_vertex = tf.reduce_mean(tf.reduce_sum(tf.square( Yonehot- encoder_outputYlogits),axis=1))
         maxlogit = tf.reduce_mean(tf.reduce_max(encoder_outputYlogits,axis=1))
         minlogit = tf.reduce_mean(tf.reduce_min(encoder_outputYlogits,axis=1))
         sumlogit = tf.reduce_mean(tf.reduce_sum(encoder_outputYlogits,axis=1))
@@ -428,7 +430,7 @@ with tf.name_scope("ge_loss"):
             labels=tf.ones_like(d_Zfake), logits=d_Zfake))
     d_Yfooling =w_yfool*tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(\
             labels=tf.ones_like(d_Yfake), logits=d_Yfake))
-    generator_loss = autoencoder_loss+classification_loss+d_Zfooling+d_Yfooling
+    generator_loss = autoencoder_loss+classification_loss+d_Zfooling+d_Yfooling+dist_to_vertexT
     pre_generator_loss = autoencoder_loss+classification_loss
 
 # metrics
@@ -480,6 +482,7 @@ tf.summary.scalar(name='Classification_Loss', tensor=classification_loss)
 tf.summary.scalar(name='Accuracy', tensor=accuracy)
 tf.summary.scalar(name='Training_Accuracy', tensor=t_accuracy)
 tf.summary.scalar(name='Distance_to_Vertex', tensor=dist_to_vertex)
+tf.summary.scalar(name='Training_Distance_to_Vertex', tensor=dist_to_vertexT)
 tf.summary.scalar(name='maxlogit', tensor=maxlogit)
 tf.summary.scalar(name='minlogit', tensor=minlogit)
 tf.summary.scalar(name='sumlogit', tensor=sumlogit)
